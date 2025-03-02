@@ -5,4 +5,4 @@ WORKDIR /app
 # Copy everything from source directory into /App
 COPY . ./
 EXPOSE 8000
-ENTRYPOINT ["dotnet", "CrawlSharp.Server.dll", "0.0.0.0", "8000"]
+ENTRYPOINT ["dotnet", "CrawlSharp.Server.dll", "*", "8000"]
