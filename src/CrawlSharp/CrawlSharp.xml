@@ -1,0 +1,570 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>CrawlSharp</name>
+    </assembly>
+    <members>
+        <member name="T:CrawlSharp.Web.AuthenticationSettings">
+            <summary>
+            Authentication settings.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.Type">
+            <summary>
+            Authentication type.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.Username">
+            <summary>
+            Username for basic authentication.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.Password">
+            <summary>
+            Password for basic authentication.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.ApiKeyHeader">
+            <summary>
+            Header to use for attaching an API key to the request.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.ApiKey">
+            <summary>
+            API key to attach.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.BearerToken">
+            <summary>
+            Bearer token to use in the authorization header.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.AuthenticationSettings.#ctor">
+            <summary>
+            Authentication settings.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.AuthenticationTypeEnum">
+            <summary>
+            Authentication type.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.AuthenticationTypeEnum.None">
+            <summary>
+            None.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.AuthenticationTypeEnum.Basic">
+            <summary>
+            Basic.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.AuthenticationTypeEnum.ApiKey">
+            <summary>
+            API key.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.AuthenticationTypeEnum.BearerToken">
+            <summary>
+            BearerToken.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.CrawlSettings">
+            <summary>
+            Crawl settings.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.UserAgent">
+            <summary>
+            User agent.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.StartUrl">
+            <summary>
+            Start URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.IgnoreRobotsText">
+            <summary>
+            Boolean indicating whether or not the contents of the webserver's robots.txt file should be ignored.
+            This value should remain false unless you are crawling web servers that you own and operate or you have been provided explicit permission to do so.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.IncludeSitemap">
+            <summary>
+            Boolean indicating whether or not the contents of the sitemap.xml should be included.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.FollowLinks">
+            <summary>
+            Boolean specifying whether or not page links should be followed.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.FollowRedirects">
+            <summary>
+            Boolean specifying whether or not redirects should be followed.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RestrictToChildUrls">
+            <summary>
+            Boolean indicating if only links that are child URLs to the entry URL should be followed.
+            Option is only valid when FollowLinks is set to true.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.MaxCrawlDepth">
+            <summary>
+            Maximum crawl depth, that is, how many levels of links to follow from the entry URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.ExcludeLinkPatterns">
+            <summary>
+            Regular expression patterns to use to exclude from link following.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.FollowExternalLinks">
+            <summary>
+            Boolean indicating whether links leading to external sources should be followed.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.MaxParallelTasks">
+            <summary>
+            Maximum number of tasks to run in parallel.  Default is 8.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.CrawlSettings.#ctor">
+            <summary>
+            Authentication settings.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.QueuedLink">
+            <summary>
+            Queued link.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.QueuedLink.Url">
+            <summary>
+            URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.QueuedLink.ParentUrl">
+            <summary>
+            Parent URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.QueuedLink.Depth">
+            <summary>
+            Depth.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.QueuedLink.#ctor">
+            <summary>
+            Queued link.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.RobotsFile">
+            <summary>
+            Robots.txt file.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RobotsFile.Contents">
+            <summary>
+            File contents.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RobotsFile.Disallow">
+            <summary>
+            Dictionary containing disallow values.  
+            The key is the user agent, and the value is the list of disallowed URL paths.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RobotsFile.Allow">
+            <summary>
+            Dictionary containing allow values.  
+            The key is the user agent, and the value is the list of allowed URL paths.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RobotsFile.Sitemap">
+            <summary>
+            Dictionary containing sitemaps.  
+            The key is the user agent, and the value is the sitemap.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RobotsFile.CrawlDelay">
+            <summary>
+            Dictionary containing crawl delay values.  
+            The key is the user agent, and the value is the crawl delay.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.#ctor(System.String)">
+            <summary>
+            Robots.txt file.
+            </summary>
+            <param name="contents">Robots.txt file contents.</param>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.#ctor(System.Byte[])">
+            <summary>
+            Robots.txt file.
+            </summary>
+            <param name="contents">Robots.txt file contents.</param>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.GetDisallowUrls(System.String)">
+            <summary>
+            Retrieve the list of disallow URLs.  If no user agent is supplied, * will be used.
+            </summary>
+            <param name="userAgent">User-agent.</param>
+            <returns>List of URLs specified as disallowed.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.GetAllowUrls(System.String)">
+            <summary>
+            Retrieve the list of allow URLs.  If no user agent is supplied, * will be used.
+            </summary>
+            <param name="userAgent">User-agent.</param>
+            <returns>List of URLs specified as allowed.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.GetSitemap(System.String)">
+            <summary>
+            Retrieve the sitemap.  If no user agent is supplied, * will be used.
+            </summary>
+            <param name="userAgent">User-agent.</param>
+            <returns>Sitemap, if specified.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.GetCrawlDelay(System.String)">
+            <summary>
+            Retrieve the crawl delay.  If no user agent is supplied, * will be used.
+            </summary>
+            <param name="userAgent">User-agent.</param>
+            <returns>Crawl delay, if specified.  Otherwise, 0 is returned.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.HasRulesForUserAgent(System.String)">
+            <summary>
+            Checks if specific rules exist for the given user agent.
+            </summary>
+            <param name="userAgent">User agent to check.</param>
+            <returns>True if the user agent has specific rules, false otherwise.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.RobotsFile.IsPathAllowed(System.String,System.String)">
+            <summary>
+            Determine if a path can be crawled by a specific user agent.
+            </summary>
+            <param name="userAgent">User agent.</param>
+            <param name="path">Path.</param>
+            <returns>True if allowed.</returns>
+        </member>
+        <member name="T:CrawlSharp.Web.Settings">
+            <summary>
+            Web crawler settings.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.Settings.Authentication">
+            <summary>
+            Authentication settings.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.Settings.Crawl">
+            <summary>
+            Crawl settings.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.Settings.#ctor">
+            <summary>
+            Web crawler settings.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.SitemapImage">
+            <summary>
+            Sitemap image.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapImage.Location">
+            <summary>
+            Location.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapImage.Caption">
+            <summary>
+            Caption.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapImage.GeoLocation">
+            <summary>
+            Geolocation.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapImage.Title">
+            <summary>
+            Title.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapImage.License">
+            <summary>
+            License.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapImage.#ctor">
+            <summary>
+            Sitemap image.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.SitemapIndex">
+            <summary>
+            Sitemap index containing multiple sitemap locations.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapIndex.Locations">
+            <summary>
+            Sitemap locations.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapIndex.#ctor">
+            <summary>
+            Sitemap index containing multiple sitemap locations.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.SitemapParser">
+            <summary>
+            Sitemap parser.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapParser.IsParseable(System.String)">
+            <summary>
+            Test if text is parseable as an XML document.
+            </summary>
+            <param name="text">Text.</param>
+            <returns>True if parseable.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapParser.IsSitemapIndex(System.String)">
+            <summary>
+            Test if text is a sitemap index.
+            </summary>
+            <param name="text">Text.</param>
+            <returns>True if the text is a sitemap index.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapParser.ParseSitemapIndex(System.String)">
+            <summary>
+            Parse a sitemap index.
+            </summary>
+            <param name="text">Text.</param>
+            <returns>Sitemap index.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapParser.ParseSitemap(System.String)">
+            <summary>
+            Parse a sitemap.
+            </summary>
+            <param name="text">Text.</param>
+            <returns>List of sitemap URLs.</returns>
+        </member>
+        <member name="T:CrawlSharp.Web.SitemapUrl">
+            <summary>
+            Sitemap URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapUrl.Location">
+            <summary>
+            Location.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapUrl.LastModified">
+            <summary>
+            Timestamp from last modification.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapUrl.ChangeFrequency">
+            <summary>
+            Change frequency.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapUrl.Priority">
+            <summary>
+            Priority.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapUrl.Images">
+            <summary>
+            Images.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapUrl.Videos">
+            <summary>
+            Videos.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapUrl.#ctor">
+            <summary>
+            Sitemap URL.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.SitemapVideo">
+            <summary>
+            Sitemap video.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.ThumbnailLocation">
+            <summary>
+            Thumbnail location.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.Title">
+            <summary>
+            Title.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.Description">
+            <summary>
+            Description.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.ContentLocation">
+            <summary>
+            Content location.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.PlayerLocation">
+            <summary>
+            Player location.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.Duration">
+            <summary>
+            Duration.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.ExpirationDate">
+            <summary>
+            Expiration date.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.Rating">
+            <summary>
+            Rating.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.ViewCount">
+            <summary>
+            View count.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.PublicationDate">
+            <summary>
+            Publication date.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.Tags">
+            <summary>
+            Tags.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.SitemapVideo.Category">
+            <summary>
+            Category.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.SitemapVideo.#ctor">
+            <summary>
+            Sitemap video.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.WebCrawler">
+            <summary>
+            Web crawler.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebCrawler.Delay">
+            <summary>
+            Delay in milliseconds between retrievals.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebCrawler.Logger">
+            <summary>
+            Method to invoke to send log messages.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebCrawler.Exception">
+            <summary>
+            Method to invoke when exceptions are encountered.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebCrawler.VisitedLinks">
+            <summary>
+            Dictionary of visited links.  
+            When accessed, a copy is made of the internal dictionary.  
+            Your copy will not be updated automatically.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebCrawler.QueuedLinks">
+            <summary>
+            Queued links.
+            When accessed, a copy is made of the internal queue.
+            Your copy will not be updated automatically.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebCrawler.ProcessingLinks">
+            <summary>
+            Links currently being processed.
+            When accessed, a copy is made of the internal list.
+            Your copy will not be updated automatically.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.#ctor(CrawlSharp.Web.Settings)">
+            <summary>
+            Web crawler.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.Crawl(System.Threading.CancellationToken)">
+            <summary>
+            Crawl using the server and configuration defined in the supplied settings.
+            </summary>
+            <param name="token">Cancellation token.</param>
+            <returns>Enumerable of WebResource objects.</returns>
+        </member>
+        <member name="T:CrawlSharp.Web.WebResource">
+            <summary>
+            Web resource, an item identified during a crawl.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.Url">
+            <summary>
+            URL of the web resource.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.ParentUrl">
+            <summary>
+            Parent URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.Depth">
+            <summary>
+            Depth.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.Status">
+            <summary>
+            HTTP status code.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.ContentLength">
+            <summary>
+            Content-length.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.ContentType">
+            <summary>
+            Content-type.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.Headers">
+            <summary>
+            Headers from the web resource.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.Data">
+            <summary>
+            Data.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebResource.#ctor">
+            <summary>
+            Web resource, an item identified during a crawl.
+            </summary>
+        </member>
+    </members>
+</doc>

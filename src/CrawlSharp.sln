@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35527.113 d17.12
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrawlSharp", "CrawlSharp\CrawlSharp.csproj", "{FC8F9D78-D80C-465C-A2AE-4EE1A3D78327}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Test", "Test\Test.csproj", "{7BF1E5FE-B4C1-41E4-85DC-9227680F8EE1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrawlSharp.Server", "CrawlSharp.Server\CrawlSharp.Server.csproj", "{43A25F44-BB98-4E4D-89E9-39894C283DFC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FC8F9D78-D80C-465C-A2AE-4EE1A3D78327}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC8F9D78-D80C-465C-A2AE-4EE1A3D78327}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC8F9D78-D80C-465C-A2AE-4EE1A3D78327}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC8F9D78-D80C-465C-A2AE-4EE1A3D78327}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7BF1E5FE-B4C1-41E4-85DC-9227680F8EE1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7BF1E5FE-B4C1-41E4-85DC-9227680F8EE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7BF1E5FE-B4C1-41E4-85DC-9227680F8EE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7BF1E5FE-B4C1-41E4-85DC-9227680F8EE1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{43A25F44-BB98-4E4D-89E9-39894C283DFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{43A25F44-BB98-4E4D-89E9-39894C283DFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{43A25F44-BB98-4E4D-89E9-39894C283DFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{43A25F44-BB98-4E4D-89E9-39894C283DFC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
