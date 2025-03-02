@@ -1,20 +1,16 @@
 services:
 
   #
-  # LiteGraph
-  # See https://hub.docker.com/r/jchristn/litegraph
-  # and https://github.com/jchristn/LiteGraph
+  # CrawlSharp
+  # See https://hub.docker.com/r/jchristn/crawlsharp
+  # and https://github.com/jchristn/crawlsharp
   #
 
-  litegraph:
-    container_name: 'litegraph'
-    image: 'jchristn/litegraph:v3.1.0'
+  crawlsharp:
+    container_name: 'crawlsharp'
+    image: 'jchristn/crawlsharp:v1.0.0'
     network_mode: 'host'
     stdin_open: true
     tty: true
-    volumes:
-      - ./litegraph.json:/app/litegraph.json
-      - ./litegraph.db:/app/litegraph.db
-      - ./logs/:/app/logs/
     healthcheck:
-      test: curl --fail http://localhost:8701
+      test: curl --fail http://localhost:8000
