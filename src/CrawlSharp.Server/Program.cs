@@ -57,6 +57,15 @@
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.POST, "/crawl", CrawlRoute, ExceptionRoute);
             _Webserver.Routes.PostRouting = PostRoutingRoute;
 
+            if (_Hostname.Equals("*")
+                || _Hostname.Equals("+")
+                || _Hostname.Equals("0.0.0.0"))
+            {
+                Console.WriteLine("Listening on hostname " + _Hostname + " requires administrative privileges.");
+                Console.WriteLine("If you encounter an exception, restart with administrative privileges.");
+                Console.WriteLine("");
+            }
+
             _Webserver.Start();
 
             Console.WriteLine("Webserver started on " + _Webserver.Settings.Prefix);
