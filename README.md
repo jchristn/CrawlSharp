@@ -1,4 +1,4 @@
-<img src="https://github.com/jchristn/CrawlSharp/blob/main/assets/favicon.png" width="256" height="256">
+<img src="https://raw.githubusercontent.com/jchristn/CrawlSharp/refs/heads/main/assets/icon.png" width="256" height="256">
 
 # CrawlSharp
 
