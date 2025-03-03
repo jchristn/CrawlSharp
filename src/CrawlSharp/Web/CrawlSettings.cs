@@ -72,6 +72,29 @@ namespace CrawlSharp.Web
         public bool RestrictToChildUrls { get; set; } = true;
 
         /// <summary>
+        /// Boolean indicating if only links that are within the same domain to the entry URL should be followed.
+        /// Option is only valid when FollowLinks is set to true.
+        /// </summary>
+        public bool RestrictToSameDomain { get; set; } = true;
+
+        /// <summary>
+        /// List of allowed domains.  If empty, all domains will be allowed.  Otherwise, only the domains specified here will be allowed.
+        /// Option is only valid when FollowLinks is set to true.
+        /// </summary>
+        public List<string> AllowedDomains
+        {
+            get
+            {
+                return _AllowedDomains;
+            }
+            set
+            {
+                if (value == null) value = new List<string>();
+                _AllowedDomains = value;
+            }
+        }
+
+        /// <summary>
         /// Maximum crawl depth, that is, how many levels of links to follow from the entry URL.
         /// </summary>
         public int MaxCrawlDepth
@@ -130,6 +153,7 @@ namespace CrawlSharp.Web
 
         private string _UserAgent = "CrawlSharp";
         private string _StartUrl = null;
+        private List<string> _AllowedDomains = new List<string>();
         private int _MaxCrawlDepth = 5;
         private List<Regex> _ExcludeLinkPatterns = new List<Regex>();
         private int _MaxParallelTasks = 8;

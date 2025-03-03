@@ -72,7 +72,10 @@
             settings.Crawl.StartUrl = url;
             settings.Crawl.MaxParallelTasks = 16;
             settings.Crawl.RestrictToChildUrls = false;
-            settings.Crawl.MaxCrawlDepth = 2;
+            settings.Crawl.RestrictToSameDomain = false;
+            settings.Crawl.MaxCrawlDepth = 1;
+            settings.Crawl.AllowedDomains.Add("soundcloud.com");
+            settings.Crawl.AllowedDomains.Add("timberstud.io");
 
             WebCrawler crawler = new WebCrawler(settings);
             crawler.Logger = Console.WriteLine;

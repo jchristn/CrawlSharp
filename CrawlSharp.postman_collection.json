@@ -45,7 +45,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://leoaestheticsboutique.com\",\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"MaxCrawlDepth\": 2,\r\n    \"MaxParallelTasks\": 16,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true\r\n  }\r\n}",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://leoaestheticsboutique.com\",\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameDomain\": false,\r\n    \"MaxCrawlDepth\": 2,\r\n    \"MaxParallelTasks\": 16,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true\r\n  }\r\n}",
 					"options": {
 						"raw": {
 							"language": "json"

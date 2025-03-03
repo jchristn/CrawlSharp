@@ -111,6 +111,18 @@
             Option is only valid when FollowLinks is set to true.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RestrictToSameDomain">
+            <summary>
+            Boolean indicating if only links that are within the same domain to the entry URL should be followed.
+            Option is only valid when FollowLinks is set to true.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.AllowedDomains">
+            <summary>
+            List of allowed domains.  If empty, all domains will be allowed.  Otherwise, only the domains specified here will be allowed.
+            Option is only valid when FollowLinks is set to true.
+            </summary>
+        </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.MaxCrawlDepth">
             <summary>
             Maximum crawl depth, that is, how many levels of links to follow from the entry URL.

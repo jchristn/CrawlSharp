@@ -9,6 +9,7 @@
     using System.Linq;
     using System.Net;
     using System.Net.Http;
+    using System.Reflection.Metadata.Ecma335;
     using System.Reflection.PortableExecutable;
     using System.Runtime.CompilerServices;
     using System.Text;
@@ -669,14 +670,75 @@
             return false;
         }
 
+        private bool IsSameDomain(string url1, string url2)
+        {
+            // Handle null or empty inputs
+            if (string.IsNullOrWhiteSpace(url1) || string.IsNullOrWhiteSpace(url2)) return false;
+
+            try
+            {
+                // Handle relative URLs for url2
+                Uri url1Uri = new Uri(url1);
+                if (url2.StartsWith("/"))
+                {
+                    // Relative to root, so it's the same domain
+                    return true;
+                }
+                else if (url2.StartsWith("./") || url2.StartsWith("../") ||
+                        (!url2.Contains("://") && !url2.StartsWith("//")))
+                {
+                    // Relative URL, so it's the same domain
+                    return true;
+                }
+
+                // If url2 starts with "//", it's protocol-relative, so prepend the scheme from url1
+                if (url2.StartsWith("//"))
+                {
+                    url2 = $"{url1Uri.Scheme}:{url2}";
+                }
+
+                // Parse URL2 into a URI object
+                Uri url2Uri = new Uri(url2);
+
+                // Compare domains (hosts)
+                return string.Equals(url1Uri.Host, url2Uri.Host, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (UriFormatException)
+            {
+                // If URLs are invalid, return false
+                return false;
+            }
+        }
+
+        private bool IsAllowedDomain(string baseUrl, List<string> allowedDomains)
+        {
+            if (String.IsNullOrEmpty(baseUrl)) return false;
+            if (allowedDomains == null || allowedDomains.Count < 1) return true;
+
+            if (!baseUrl.Contains("://") && !baseUrl.StartsWith("//")) return true; // relative URLs are always allowed
+
+            try
+            {
+                if (baseUrl.StartsWith("//")) baseUrl = "http:" + baseUrl;
+
+                Uri uri = new Uri(baseUrl);
+                string domain = uri.Host.ToLowerInvariant();
+
+                return allowedDomains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase));
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+        }
+
         private bool IsChildUrl(string baseUrl, string testUrl)
         {
             // Handle null or empty inputs
-            if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(testUrl))
-                return false;
+            if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(testUrl)) return false;
+
             try
             {
-                // Handle relative URLs
                 Uri baseUriObj = new Uri(baseUrl);
 
                 if (testUrl.StartsWith("/"))
@@ -703,8 +765,7 @@
                 Uri testUri = new Uri(normalizedTest);
 
                 // Check if domains match
-                if (!string.Equals(basePathUri.Host, testUri.Host, StringComparison.OrdinalIgnoreCase))
-                    return false;
+                if (!string.Equals(basePathUri.Host, testUri.Host, StringComparison.OrdinalIgnoreCase)) return false;
 
                 // Check if test path starts with base path
                 string basePath = basePathUri.AbsolutePath;
@@ -719,7 +780,6 @@
             }
             catch (UriFormatException)
             {
-                // If URLs are invalid, return false
                 return false;
             }
         }
@@ -928,9 +988,21 @@
                                             continue;
                                         }
 
+                                        if (_Settings.Crawl.RestrictToSameDomain && !IsSameDomain(_Settings.Crawl.StartUrl, currTrimmed))
+                                        {
+                                            Log("avoiding link not in start URL domain " + currTrimmed);
+                                            continue;
+                                        }
+
                                         if (_Settings.Crawl.RestrictToChildUrls && !IsChildUrl(_Settings.Crawl.StartUrl, currTrimmed))
                                         {
                                             Log("avoiding non-child link " + currTrimmed);
+                                            continue;
+                                        }
+
+                                        if (!IsAllowedDomain(currTrimmed, _Settings.Crawl.AllowedDomains))
+                                        {
+                                            Log("avoiding disallowed domain in link " + currTrimmed);
                                             continue;
                                         }
 
