@@ -73,7 +73,7 @@
             foreach (var sitemapElement in doc.Descendants(NS_SITEMAP + "sitemap"))
             {
                 string location = sitemapElement.Element(NS_SITEMAP + "loc")?.Value;
-                if (!string.IsNullOrEmpty(location))
+                if (!String.IsNullOrEmpty(location))
                 {
                     index.Locations.Add(location);
                 }

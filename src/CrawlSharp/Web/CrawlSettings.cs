@@ -38,7 +38,7 @@ namespace CrawlSharp.Web
             }
             set
             {
-                if (string.IsNullOrEmpty(value)) throw new ArgumentNullException(nameof(StartUrl));
+                if (String.IsNullOrEmpty(value)) throw new ArgumentNullException(nameof(StartUrl));
                 Uri test = new Uri(value);
                 _StartUrl = value;
             }

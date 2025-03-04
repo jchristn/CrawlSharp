@@ -16,6 +16,7 @@
     using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
+    using CrawlSharp.Helpers;
     using HtmlAgilityPack;
     using RestWrapper;
     using SerializationHelper;
@@ -262,7 +263,7 @@
                 try
                 {
                     normalizedUri = new Uri(fullUrl);
-                    if (!string.IsNullOrEmpty(normalizedUri.Fragment))
+                    if (!String.IsNullOrEmpty(normalizedUri.Fragment))
                     {
                         UriBuilder builder = new UriBuilder(normalizedUri);
                         builder.Fragment = "";
@@ -335,7 +336,7 @@
                                     try
                                     {
                                         redirectUri = new Uri(redirectNormalizedUrl);
-                                        if (!string.IsNullOrEmpty(redirectUri.Fragment))
+                                        if (!String.IsNullOrEmpty(redirectUri.Fragment))
                                         {
                                             UriBuilder builder = new UriBuilder(redirectUri);
                                             builder.Fragment = "";
@@ -388,6 +389,9 @@
                             ParentUrl = parentUrl,
                             Depth = depth,
                             Status = resp.StatusCode,
+                            MD5Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.MD5Hash(resp.DataAsBytes)) : null,
+                            SHA1Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA1Hash(resp.DataAsBytes)) : null,
+                            SHA256Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA256Hash(resp.DataAsBytes)) : null,
                             Headers = resp.Headers,
                             Data = resp.DataAsBytes
                         };
@@ -545,7 +549,7 @@
                         {
                             // Normalize the URL immediately when extracting
                             string normalizedUrl = NormalizeUrl(url, href);
-                            if (!string.IsNullOrEmpty(normalizedUrl))
+                            if (!String.IsNullOrEmpty(normalizedUrl))
                             {
                                 links.Add(normalizedUrl);
                             }
@@ -580,7 +584,7 @@
                 Uri combined = new Uri(baseUri, evalUrl);
 
                 // Remove fragments for storage/comparison purposes
-                if (!string.IsNullOrEmpty(combined.Fragment))
+                if (!String.IsNullOrEmpty(combined.Fragment))
                 {
                     UriBuilder builder = new UriBuilder(combined);
                     builder.Fragment = "";
@@ -712,18 +716,27 @@
 
         private bool IsAllowedDomain(string baseUrl, List<string> allowedDomains)
         {
-            if (String.IsNullOrEmpty(baseUrl)) return false;
             if (allowedDomains == null || allowedDomains.Count < 1) return true;
 
-            if (!baseUrl.Contains("://") && !baseUrl.StartsWith("//")) return true; // relative URLs are always allowed
+            if (String.IsNullOrEmpty(baseUrl))
+            {
+                Log("checking allowed domains and received and empty base URL");
+                return false;
+            }
+
+            if (!baseUrl.Contains("://") && !baseUrl.StartsWith("//")) return true;
+            if (baseUrl.StartsWith("./")) return true;
 
             try
             {
+                // Handle protocol-relative URLs
                 if (baseUrl.StartsWith("//")) baseUrl = "http:" + baseUrl;
 
+                // Parse URL and extract domain
                 Uri uri = new Uri(baseUrl);
                 string domain = uri.Host.ToLowerInvariant();
 
+                // Check for exact match in the allowed domains list
                 return allowedDomains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase));
             }
             catch (UriFormatException)

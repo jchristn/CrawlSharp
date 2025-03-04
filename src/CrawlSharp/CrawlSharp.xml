@@ -4,6 +4,53 @@
         <name>CrawlSharp</name>
     </assembly>
     <members>
+        <member name="T:CrawlSharp.Helpers.HashHelper">
+            <summary>
+            Hash methods.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.MD5Hash(System.Byte[])">
+            <summary>
+            Generate an MD5 hash.
+            </summary>
+            <param name="data">Data.</param>
+            <returns>MD5 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.MD5Hash(System.IO.Stream)">
+            <summary>
+            Generate an MD5 hash.
+            </summary>
+            <param name="stream">Stream.</param>
+            <returns>MD5 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA1Hash(System.Byte[])">
+            <summary>
+            Generate a SHA1 hash of a byte array.
+            </summary>
+            <param name="data">Data.</param>
+            <returns>SHA1 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA1Hash(System.IO.Stream)">
+            <summary>
+            Generate a SHA1 hash.
+            </summary>
+            <param name="stream">Stream.</param>
+            <returns>MD5 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA256Hash(System.Byte[])">
+            <summary>
+            Generate a SHA256 hash of a byte array.
+            </summary>
+            <param name="data">Data.</param>
+            <returns>SHA256 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA256Hash(System.IO.Stream)">
+            <summary>
+            Generate a SHA256 hash.
+            </summary>
+            <param name="stream">Stream.</param>
+            <returns>MD5 hash.</returns>
+        </member>
         <member name="T:CrawlSharp.Web.AuthenticationSettings">
             <summary>
             Authentication settings.
@@ -561,6 +608,21 @@
         <member name="P:CrawlSharp.Web.WebResource.ContentType">
             <summary>
             Content-type.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.MD5Hash">
+            <summary>
+            MD5 of the content.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.SHA1Hash">
+            <summary>
+            SHA1 of the content.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.SHA256Hash">
+            <summary>
+            SHA256 of the content.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.WebResource.Headers">

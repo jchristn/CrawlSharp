@@ -74,8 +74,6 @@
             settings.Crawl.RestrictToChildUrls = false;
             settings.Crawl.RestrictToSameDomain = false;
             settings.Crawl.MaxCrawlDepth = 1;
-            settings.Crawl.AllowedDomains.Add("soundcloud.com");
-            settings.Crawl.AllowedDomains.Add("timberstud.io");
 
             WebCrawler crawler = new WebCrawler(settings);
             crawler.Logger = Console.WriteLine;

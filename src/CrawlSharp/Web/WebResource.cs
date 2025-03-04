@@ -87,6 +87,21 @@
         }
 
         /// <summary>
+        /// MD5 of the content.
+        /// </summary>
+        public string MD5Hash { get; set; } = null;
+
+        /// <summary>
+        /// SHA1 of the content.
+        /// </summary>
+        public string SHA1Hash { get; set; } = null;
+
+        /// <summary>
+        /// SHA256 of the content.
+        /// </summary>
+        public string SHA256Hash { get; set; } = null;
+
+        /// <summary>
         /// Headers from the web resource.
         /// </summary>
         public NameValueCollection Headers
