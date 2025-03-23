@@ -563,9 +563,22 @@
             Your copy will not be updated automatically.
             </summary>
         </member>
-        <member name="M:CrawlSharp.Web.WebCrawler.#ctor(CrawlSharp.Web.Settings)">
+        <member name="M:CrawlSharp.Web.WebCrawler.#ctor(CrawlSharp.Web.Settings,System.Threading.CancellationToken)">
             <summary>
             Web crawler.
+            </summary>
+            <param name="settings">Settings.</param>
+            <param name="token">Cancellation token.</param>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.Dispose(System.Boolean)">
+            <summary>
+            Disposes of resources used by the WebCrawler.
+            </summary>
+            <param name="disposing">True if called from Dispose(), false if called from finalizer.</param>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.Dispose">
+            <summary>
+            Disposes of resources used by the WebCrawler.
             </summary>
         </member>
         <member name="M:CrawlSharp.Web.WebCrawler.Crawl(System.Threading.CancellationToken)">

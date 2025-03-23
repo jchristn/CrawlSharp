@@ -24,7 +24,7 @@
     /// <summary>
     /// Web crawler.
     /// </summary>
-    public class WebCrawler
+    public class WebCrawler : IDisposable
     {
         #region Public-Members
 
@@ -110,6 +110,7 @@
         private Settings _Settings = null;
         private Serializer _Serializer = new Serializer();
         private int _DelayMilliseconds = 0;
+        private bool _Disposed = false;
 
         private RobotsFile _RobotsFile = new RobotsFile("");
 
@@ -127,6 +128,7 @@
         private readonly object _FinishedLinksLock = new object();
         private Queue<WebResource> _FinishedLinks = new Queue<WebResource>();
 
+        private CancellationToken _Token;
         private Task _QueueProcessor = null;
 
         #endregion
@@ -136,15 +138,73 @@
         /// <summary>
         /// Web crawler.
         /// </summary>
-        public WebCrawler(Settings settings)
+        /// <param name="settings">Settings.</param>
+        /// <param name="token">Cancellation token.</param>
+        public WebCrawler(Settings settings, CancellationToken token = default)
         {
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Semaphore = new SemaphoreSlim(_Settings.Crawl.MaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
+            _Token = token;
         }
 
         #endregion
 
         #region Public-Methods
+
+        /// <summary>
+        /// Disposes of resources used by the WebCrawler.
+        /// </summary>
+        /// <param name="disposing">True if called from Dispose(), false if called from finalizer.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_Disposed)
+            {
+                if (disposing)
+                {
+                    CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_Token);
+                    cts.Cancel();
+
+                    if (_QueueProcessor != null && !_QueueProcessor.IsCompleted)
+                    {
+                        int maxWait = 3000;
+                        int waited = 0;
+
+                        while (waited < maxWait)
+                        {
+                            bool completed = _QueueProcessor.Wait(100);
+                            if (completed) break;
+                            waited += 100;
+                        }
+                    }
+
+                    cts.Dispose();
+
+                    _Semaphore?.Dispose();
+                    _QueuedLinks?.Clear();
+                    _ProcessingLinks?.Clear();
+                    _VisitedLinks?.Clear();
+                    _FinishedLinks?.Clear();
+                }
+
+                _Serializer = null;
+                _Semaphore = null;
+                _QueuedLinks = null;
+                _ProcessingLinks = null;
+                _VisitedLinks = null;
+                _FinishedLinks = null;
+
+                _Disposed = true;
+            }
+        }
+
+        /// <summary>
+        /// Disposes of resources used by the WebCrawler.
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
 
         /// <summary>
         /// Crawl using the server and configuration defined in the supplied settings.
@@ -155,7 +215,9 @@
         {
             #region Process-Robots-and-Sitemap
 
-            await RetrieveRobotsFile(_Settings.Crawl.StartUrl, token).ConfigureAwait(false);
+            CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_Token, token);
+
+            await RetrieveRobotsFile(_Settings.Crawl.StartUrl, cts.Token).ConfigureAwait(false);
 
             if (_RobotsFile != null)
             {
@@ -167,7 +229,7 @@
                 }
             }
 
-            await ProcessSitemap(_Settings.Crawl.StartUrl, token).ConfigureAwait(false);
+            await ProcessSitemap(_Settings.Crawl.StartUrl, cts.Token).ConfigureAwait(false);
 
             #endregion
 
@@ -179,11 +241,11 @@
 
             #region Start-Queue-Processor
 
-            _QueueProcessor = Task.Run(() => QueueProcessor(token), token);
+            _QueueProcessor = Task.Run(() => QueueProcessor(cts.Token), cts.Token);
 
             while (!_QueueProcessor.IsCompleted)
             {
-                await Task.Delay(10).ConfigureAwait(false);
+                await Task.Delay(10, cts.Token).ConfigureAwait(false);
 
                 WebResource wr = DequeueWebResource();
                 if (wr != null) yield return wr;
