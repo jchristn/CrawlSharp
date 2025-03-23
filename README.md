@@ -24,10 +24,11 @@ using CrawlSharp;
 Settings settings = new Settings();
 settings.Crawl.StartUrl = "http://www.mywebpage.com";
 
-WebCrawler crawler = new WebCrawler(settings);
-
-await foreach (WebResource resource in crawler.Crawl())
-  Console.WriteLine(resource.Status + ": " + resource.Url);
+using (WebCrawler crawler = new WebCrawler(settings))
+{
+  await foreach (WebResource resource in crawler.Crawl())
+    Console.WriteLine(resource.Status + ": " + resource.Url);
+}
 ```
 
 ## Web Resources
