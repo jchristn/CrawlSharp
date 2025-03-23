@@ -84,7 +84,7 @@
             int resourcesCrawled = 0;
             List<string> urls = new List<string>();
 
-            await foreach (WebResource resource in crawler.Crawl())
+            await foreach (WebResource resource in crawler.CrawlAsync())
             {
                 string parentUrl = ".";
                 if (!String.IsNullOrEmpty(resource.ParentUrl)) parentUrl = resource.ParentUrl;

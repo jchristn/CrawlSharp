@@ -26,11 +26,13 @@ settings.Crawl.StartUrl = "http://www.mywebpage.com";
 
 using (WebCrawler crawler = new WebCrawler(settings))
 {
-  await foreach (WebResource resource in crawler.Crawl())
+  await foreach (WebResource resource in crawler.CrawlAsync()) 
     Console.WriteLine(resource.Status + ": " + resource.Url);
 }
 ```
 
+`WebCrawler.CrawlAsync` can be `await`ed, returning an `IAsyncEnumerable<WebResource>` whereas `WebCrawler.Crawl` cannot be `await`ed, returning an `IEnumerable<WebResource>`.
+  
 ## Web Resources
 
 Objects crawled using CrawlSharp have the following properties:

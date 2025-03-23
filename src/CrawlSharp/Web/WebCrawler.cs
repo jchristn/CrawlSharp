@@ -209,9 +209,66 @@
         /// <summary>
         /// Crawl using the server and configuration defined in the supplied settings.
         /// </summary>
+        /// <returns>Enumerable of WebResource objects.</returns>
+        public IEnumerable<WebResource> Crawl()
+        {
+            #region Process-Robots-and-Sitemap
+
+            Task robotsFile = RetrieveRobotsFile(_Settings.Crawl.StartUrl, _Token);
+            robotsFile.Wait();
+
+            if (_RobotsFile != null)
+            {
+                decimal crawlDelay = _RobotsFile.GetCrawlDelay(_Settings.Crawl.UserAgent);
+                if (crawlDelay > 0)
+                {
+                    _DelayMilliseconds = (int)(crawlDelay * 1000);
+                    Log("crawl delay set to " + _DelayMilliseconds + "ms per robots.txt");
+                }
+            }
+
+            Task processSitemap = ProcessSitemap(_Settings.Crawl.StartUrl, _Token);
+            processSitemap.Wait();
+
+            #endregion
+
+            #region Enqueue-Root-Url
+
+            EnqueueQueuedLink(_Settings.Crawl.StartUrl, null, 0);
+
+            #endregion
+
+            #region Start-Queue-Processor
+
+            _QueueProcessor = Task.Run(() => QueueProcessor(_Token), _Token);
+
+            while (!_QueueProcessor.IsCompleted)
+            {
+                Task.Delay(10, _Token).Wait();
+                WebResource wr = DequeueWebResource();
+                if (wr != null) yield return wr;
+            }
+
+            #endregion
+
+            #region Drain-the-Queue
+
+            while (true)
+            {
+                WebResource wr = DequeueWebResource();
+                if (wr == null) break;
+                yield return wr;
+            }
+
+            #endregion
+        }
+
+        /// <summary>
+        /// Crawl using the server and configuration defined in the supplied settings.
+        /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Enumerable of WebResource objects.</returns>
-        public async IAsyncEnumerable<WebResource> Crawl([EnumeratorCancellation] CancellationToken token = default)
+        public async IAsyncEnumerable<WebResource> CrawlAsync([EnumeratorCancellation] CancellationToken token = default)
         {
             #region Process-Robots-and-Sitemap
 

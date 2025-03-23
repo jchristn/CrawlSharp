@@ -229,7 +229,7 @@
 
                 _Logging.Debug(_Header + "crawl request received from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl);
 
-                await foreach (WebResource resource in crawler.Crawl())
+                await foreach (WebResource resource in crawler.CrawlAsync())
                 {
                     await ctx.Response.SendEvent(_Serializer.SerializeJson(resource, false), false);
                 }

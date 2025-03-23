@@ -581,7 +581,13 @@
             Disposes of resources used by the WebCrawler.
             </summary>
         </member>
-        <member name="M:CrawlSharp.Web.WebCrawler.Crawl(System.Threading.CancellationToken)">
+        <member name="M:CrawlSharp.Web.WebCrawler.Crawl">
+            <summary>
+            Crawl using the server and configuration defined in the supplied settings.
+            </summary>
+            <returns>Enumerable of WebResource objects.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.CrawlAsync(System.Threading.CancellationToken)">
             <summary>
             Crawl using the server and configuration defined in the supplied settings.
             </summary>
