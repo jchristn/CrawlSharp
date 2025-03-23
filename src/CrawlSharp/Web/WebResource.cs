@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.Collections.Specialized;
+    using System.IO;
     using System.Linq;
     using System.Reflection.PortableExecutable;
     using System.Text;
@@ -24,6 +25,30 @@
         /// Parent URL.
         /// </summary>
         public string ParentUrl { get; set; } = null;
+
+        /// <summary>
+        /// Filename.
+        /// </summary>
+        public string Filename
+        {
+            get
+            {
+                if (!String.IsNullOrEmpty(Url))
+                {
+                    try
+                    {
+                        Uri uri = new Uri(Url);
+                        string path = Uri.UnescapeDataString(uri.AbsolutePath);
+                        return Path.GetFileName(path);
+                    }
+                    catch (UriFormatException)
+                    {
+                    }
+                }
+
+                return string.Empty;
+            }
+        }
 
         /// <summary>
         /// Depth.

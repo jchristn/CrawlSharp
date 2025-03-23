@@ -609,6 +609,11 @@
             Parent URL.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.WebResource.Filename">
+            <summary>
+            Filename.
+            </summary>
+        </member>
         <member name="P:CrawlSharp.Web.WebResource.Depth">
             <summary>
             Depth.
