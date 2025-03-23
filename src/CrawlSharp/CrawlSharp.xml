@@ -649,6 +649,11 @@
             SHA256 of the content.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.WebResource.LastModified">
+            <summary>
+            Last modified timestamp, from the Last-Modified header, if it exists.
+            </summary>
+        </member>
         <member name="P:CrawlSharp.Web.WebResource.Headers">
             <summary>
             Headers from the web resource.

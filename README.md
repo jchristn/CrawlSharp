@@ -39,10 +39,15 @@ Objects crawled using CrawlSharp have the following properties:
 
 - `Url` - the URL from which the resource was retrieved
 - `ParentUrl` - the URL from which the `Url` was identified
+- `Filename` - the filename component from the URL, if any
 - `Depth` - the depth level at which the `Url` was identified
 - `Status` - the HTTP status code returned when retrieving the `Url`
 - `ContentLength` - the content length of the body returned when retrieving `Url`
 - `ContentType` - the content type returned while retrieving `Url`
+- `MD5Hash` - the MD5 hash of the `Data`
+- `SHA1Hash` - the SHA1 hash of the `Data`
+- `SHA256Hash` - the SHA256 hash of the `Data`
+- `LastModified` - the `DateTime` from when the headers indicate the object was last modified
 - `Headers` - a `NameValueCollection` with the headers returned while retrieving `Url`
 - `Data` - a `byte[]` containing the data returned while retrieving `Url`
 

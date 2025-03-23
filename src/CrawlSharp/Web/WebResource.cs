@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.Collections.Specialized;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Reflection.PortableExecutable;
@@ -127,6 +128,32 @@
         public string SHA256Hash { get; set; } = null;
 
         /// <summary>
+        /// Last modified timestamp, from the Last-Modified header, if it exists.
+        /// </summary>
+        public DateTime? LastModified
+        {
+            get
+            {
+                if (!String.IsNullOrEmpty(_Headers.Get("Last-Modified")))
+                {
+                    DateTime result;
+
+                    if (DateTime.TryParseExact(
+                        _Headers.Get("Last-Modified"),
+                        _LastModifiedFormats,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                        out result))
+                    {
+                        return result;
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Headers from the web resource.
         /// </summary>
         public NameValueCollection Headers
@@ -154,6 +181,13 @@
         private int _Depth = 0;
         private int _Status = 0;
         private NameValueCollection _Headers = new NameValueCollection(StringComparer.InvariantCultureIgnoreCase);
+
+        private string[] _LastModifiedFormats = new[]
+        {
+            "ddd, dd MMM yyyy HH:mm:ss 'GMT'",  // RFC 7232 / RFC 1123 format
+            "dddd, dd-MMM-yy HH:mm:ss 'GMT'",   // RFC 850 format
+            "ddd MMM d HH:mm:ss yyyy"           // ANSI C's asctime() format
+        };
 
         #endregion
 
