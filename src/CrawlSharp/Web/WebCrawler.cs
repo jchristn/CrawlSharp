@@ -371,9 +371,12 @@
                     Log("invalid URL " + url);
                     return null;
                 }
-                else if (!fullUrl.ToLower().StartsWith("http"))
+
+                // FIXED: Use case-insensitive comparison for HTTP/HTTPS check
+                if (!fullUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                    !fullUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
-                    Log("URL does not start with http, skipping");
+                    Log($"URL does not start with http/https: {fullUrl} (original: {url})");
                     return null;
                 }
 
@@ -466,7 +469,20 @@
                                     {
                                         Exception?.Invoke(redirectNormalizedUrl, ufe);
                                         Log("invalid redirect URI format: " + redirectNormalizedUrl);
-                                        return null;
+
+                                        // Still need to return something for this URL
+                                        wr = new WebResource
+                                        {
+                                            Url = normalizedUri.ToString(),
+                                            ParentUrl = parentUrl,
+                                            Depth = depth,
+                                            Status = resp.StatusCode,
+                                            Headers = resp.Headers,
+                                            Data = resp.DataAsBytes
+                                        };
+
+                                        AddAlreadyVisited(normalizedUri, wr);
+                                        return wr;
                                     }
 
                                     // Check if we're being redirected to a URL we've already visited
@@ -484,7 +500,7 @@
                                     WebResource redirectedResource = await RetrieveWebResource(redirectUri.ToString(), parentUrl, depth, token).ConfigureAwait(false);
 
                                     // Store a reference to the redirect target for the original URL
-                                    if (redirectedResource != null && IsAlreadyVisited(normalizedUri))
+                                    if (redirectedResource != null)
                                     {
                                         AddAlreadyVisited(normalizedUri, redirectedResource);
                                     }
@@ -684,105 +700,147 @@
             }
         }
 
-        private string NormalizeUrl(string startUrl, string evalUrl)
+        private string NormalizeUrl(string baseUrl, string relativeUrl)
         {
             // Handle null or empty cases
-            if (string.IsNullOrWhiteSpace(evalUrl))
+            if (string.IsNullOrWhiteSpace(relativeUrl))
                 return null;
 
-            // Return evaluation URLs that are already full URLs
-            if (Uri.TryCreate(evalUrl, UriKind.Absolute, out Uri absoluteUri))
+            // Trim whitespace
+            relativeUrl = relativeUrl.Trim();
+            baseUrl = baseUrl?.Trim();
+
+            // Handle special schemes that should be ignored
+            if (relativeUrl.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("ftp:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("about:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("chrome:", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
             {
-                // Remove fragment if present
-                if (!string.IsNullOrEmpty(absoluteUri.Fragment))
+                return null;
+            }
+
+            // Check if relativeUrl is already an absolute HTTP/HTTPS URL
+            if (relativeUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                relativeUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                try
                 {
-                    var builder = new UriBuilder(absoluteUri) { Fragment = "" };
-                    return builder.Uri.ToString();
+                    Uri absUri = new Uri(relativeUrl);
+                    // Remove fragment
+                    if (!string.IsNullOrEmpty(absUri.Fragment))
+                    {
+                        UriBuilder builder = new UriBuilder(absUri) { Fragment = "" };
+                        return builder.Uri.ToString();
+                    }
+                    return relativeUrl;
                 }
-                return evalUrl;
+                catch
+                {
+                    return null;
+                }
             }
 
             // Parse the base URL
-            if (!Uri.TryCreate(startUrl, UriKind.Absolute, out Uri baseUri))
+            if (string.IsNullOrWhiteSpace(baseUrl))
             {
-                Log("invalid base URL detected in start URL " + startUrl);
+                Log("empty base URL provided to NormalizeUrl");
+                return null;
+            }
+
+            Uri baseUri;
+            try
+            {
+                baseUri = new Uri(baseUrl);
+                if (!baseUri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) &&
+                    !baseUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"base URL has invalid scheme: {baseUri.Scheme}");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"invalid base URL format: {baseUrl} - {ex.Message}");
                 return null;
             }
 
             try
             {
-                string normalizedUrl;
+                string result = null;
 
-                // Handle different types of relative URLs explicitly
-                if (evalUrl.StartsWith("//"))
+                // Handle protocol-relative URLs (//example.com/path)
+                if (relativeUrl.StartsWith("//"))
                 {
-                    // Protocol-relative URL
-                    normalizedUrl = baseUri.Scheme + ":" + evalUrl;
+                    result = baseUri.Scheme + ":" + relativeUrl;
                 }
-                else if (evalUrl.StartsWith("/"))
+                // Handle absolute paths (/path/to/page)
+                else if (relativeUrl.StartsWith("/"))
                 {
-                    // Absolute path - build from base host
-                    var builder = new UriBuilder(baseUri)
+                    result = $"{baseUri.Scheme}://{baseUri.Host}";
+                    if (!baseUri.IsDefaultPort)
                     {
-                        Path = evalUrl,
-                        Query = "",
-                        Fragment = ""
-                    };
-
-                    // Handle query string if present in evalUrl
-                    int queryIndex = evalUrl.IndexOf('?');
-                    if (queryIndex > -1)
-                    {
-                        builder.Path = evalUrl.Substring(0, queryIndex);
-                        builder.Query = evalUrl.Substring(queryIndex + 1);
-
-                        // Handle fragment in query string
-                        int fragmentIndex = builder.Query.IndexOf('#');
-                        if (fragmentIndex > -1)
-                        {
-                            builder.Query = builder.Query.Substring(0, fragmentIndex);
-                        }
+                        result += $":{baseUri.Port}";
                     }
-
-                    normalizedUrl = builder.Uri.ToString();
+                    result += relativeUrl;
                 }
-                else if (evalUrl.StartsWith("?"))
+                // Handle query strings only (?param=value)
+                else if (relativeUrl.StartsWith("?"))
                 {
-                    // Query string only - append to base URL path
-                    var builder = new UriBuilder(baseUri)
-                    {
-                        Query = evalUrl.Substring(1),
-                        Fragment = ""
-                    };
-                    normalizedUrl = builder.Uri.ToString();
+                    result = baseUri.GetLeftPart(UriPartial.Path) + relativeUrl;
                 }
-                else if (evalUrl.StartsWith("#"))
+                // Handle fragments only (#section)
+                else if (relativeUrl.StartsWith("#"))
                 {
-                    // Fragment only - return base URL without fragment
-                    var builder = new UriBuilder(baseUri) { Fragment = "" };
-                    normalizedUrl = builder.Uri.ToString();
+                    // Return base URL without fragment
+                    result = baseUri.GetLeftPart(UriPartial.Query);
                 }
+                // Handle relative paths (including ./ and ../)
                 else
                 {
-                    // Relative path (including ./ and ../)
-                    // Use Uri constructor but with explicit handling
-                    Uri combined = new Uri(baseUri, evalUrl);
-                    normalizedUrl = combined.ToString();
+                    // Use Uri class to resolve relative paths
+                    Uri combined = new Uri(baseUri, relativeUrl);
+                    result = combined.ToString();
                 }
 
-                // Final cleanup - remove any fragments
-                if (normalizedUrl.Contains("#"))
+                // Final validation and fragment removal
+                if (!string.IsNullOrEmpty(result))
                 {
-                    int fragmentIndex = normalizedUrl.IndexOf('#');
-                    normalizedUrl = normalizedUrl.Substring(0, fragmentIndex);
+                    try
+                    {
+                        Uri finalUri = new Uri(result);
+                        if (!finalUri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) &&
+                            !finalUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return null;
+                        }
+
+                        // Remove fragment if present
+                        if (!string.IsNullOrEmpty(finalUri.Fragment))
+                        {
+                            int fragmentIndex = result.IndexOf('#');
+                            if (fragmentIndex >= 0)
+                            {
+                                result = result.Substring(0, fragmentIndex);
+                            }
+                        }
+
+                        return result;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
                 }
 
-                return normalizedUrl;
+                return null;
             }
-            catch (UriFormatException e)
+            catch (Exception e)
             {
-                Exception?.Invoke(evalUrl, e);
-                Log("error normalizing URL " + evalUrl + " with base URL " + startUrl + Environment.NewLine + e.Message);
+                Log($"error normalizing URL '{relativeUrl}' with base URL '{baseUrl}': {e.Message}");
                 return null;
             }
         }
@@ -1159,6 +1217,34 @@
                 {
                     Log("processing queued link " + link.Url + " parent " + (!String.IsNullOrEmpty(link.ParentUrl) ? link.ParentUrl : ".") + " depth " + link.Depth);
 
+                    // IMPORTANT: Normalize the URL before checking if it's already visited
+                    string normalizedUrl = NormalizeUrl(_Settings.Crawl.StartUrl, link.Url);
+                    if (string.IsNullOrEmpty(normalizedUrl))
+                    {
+                        Log($"unable to normalize queued link {link.Url}");
+                        return;
+                    }
+
+                    // Update the link URL to use the normalized version
+                    link.Url = normalizedUrl;
+
+                    // Now check with the normalized URL
+                    Uri uri;
+                    try
+                    {
+                        uri = new Uri(link.Url);
+                        if (IsAlreadyVisited(uri))
+                        {
+                            Log("already visited link " + link.Url);
+                            return;
+                        }
+                    }
+                    catch (UriFormatException)
+                    {
+                        Log($"invalid URI format for normalized URL: {link.Url}");
+                        return;
+                    }
+
                     WebResource wr = await RetrieveWebResource(link.Url, link.ParentUrl, link.Depth, token).ConfigureAwait(false);
                     if (wr == null)
                     {
@@ -1166,6 +1252,7 @@
                         return;
                     }
 
+                    // Rest of the method continues as before...
                     if (wr.Data != null)
                     {
                         List<string> links = ExtractLinksFromHtml(link.Url, wr.Data);
@@ -1179,14 +1266,34 @@
                                     foreach (string curr in links.Distinct())
                                     {
                                         string currTrimmed = curr.Trim();
-                                        Uri uri = new Uri(currTrimmed);
 
-                                        if (IsAlreadyVisited(uri))
+                                        // The extracted links are already normalized from ExtractLinksFromHtml
+                                        // But let's validate they're proper HTTP/HTTPS URLs
+                                        if (!currTrimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                                            !currTrimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            Log($"skipping non-HTTP URL: {currTrimmed}");
+                                            continue;
+                                        }
+
+                                        Uri childUri;
+                                        try
+                                        {
+                                            childUri = new Uri(currTrimmed);
+                                        }
+                                        catch
+                                        {
+                                            Log($"invalid URI format for child link: {currTrimmed}");
+                                            continue;
+                                        }
+
+                                        if (IsAlreadyVisited(childUri))
                                         {
                                             Log("already visited child link " + currTrimmed);
                                             continue;
                                         }
 
+                                        // Continue with domain/path checks...
                                         if (_Settings.Crawl.RestrictToSameDomain && !IsSameDomain(_Settings.Crawl.StartUrl, currTrimmed))
                                         {
                                             Log("avoiding link not in start URL domain " + currTrimmed);
@@ -1217,8 +1324,9 @@
                                             continue;
                                         }
 
-                                        Log("adding link " + currTrimmed + " to queue from parent " + link.ParentUrl);
+                                        Log("adding link " + currTrimmed + " to queue from parent " + link.Url);
 
+                                        // Store the normalized URL in the queue
                                         EnqueueQueuedLink(currTrimmed, link.Url, link.Depth + 1);
                                     }
                                 }
@@ -1245,11 +1353,8 @@
             catch (Exception e)
             {
                 Exception?.Invoke(link.Url, e);
-
                 Log("error processing link " + link.Url + Environment.NewLine + e.ToString());
-
                 try { _Semaphore.Release(); } catch { }
-
                 RemoveProcessingLink(link);
             }
         }
