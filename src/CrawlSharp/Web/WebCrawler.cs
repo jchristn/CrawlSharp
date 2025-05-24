@@ -210,7 +210,7 @@
         /// Crawl using the server and configuration defined in the supplied settings.
         /// </summary>
         /// <returns>Enumerable of WebResource objects.</returns>
-        public IEnumerable<WebResource> Crawl()
+        public IEnumerable<WebResource> Crawl(HttpMethod method)
         {
             #region Process-Robots-and-Sitemap
 
@@ -686,9 +686,21 @@
 
         private string NormalizeUrl(string startUrl, string evalUrl)
         {
+            // Handle null or empty cases
+            if (string.IsNullOrWhiteSpace(evalUrl))
+                return null;
+
             // Return evaluation URLs that are already full URLs
-            if (Uri.TryCreate(evalUrl, UriKind.Absolute, out Uri resultUri))
+            if (Uri.TryCreate(evalUrl, UriKind.Absolute, out Uri absoluteUri))
+            {
+                // Remove fragment if present
+                if (!string.IsNullOrEmpty(absoluteUri.Fragment))
+                {
+                    var builder = new UriBuilder(absoluteUri) { Fragment = "" };
+                    return builder.Uri.ToString();
+                }
                 return evalUrl;
+            }
 
             // Parse the base URL
             if (!Uri.TryCreate(startUrl, UriKind.Absolute, out Uri baseUri))
@@ -699,18 +711,73 @@
 
             try
             {
-                // Combine base URL with relative URL
-                Uri combined = new Uri(baseUri, evalUrl);
+                string normalizedUrl;
 
-                // Remove fragments for storage/comparison purposes
-                if (!String.IsNullOrEmpty(combined.Fragment))
+                // Handle different types of relative URLs explicitly
+                if (evalUrl.StartsWith("//"))
                 {
-                    UriBuilder builder = new UriBuilder(combined);
-                    builder.Fragment = "";
-                    return builder.Uri.ToString();
+                    // Protocol-relative URL
+                    normalizedUrl = baseUri.Scheme + ":" + evalUrl;
+                }
+                else if (evalUrl.StartsWith("/"))
+                {
+                    // Absolute path - build from base host
+                    var builder = new UriBuilder(baseUri)
+                    {
+                        Path = evalUrl,
+                        Query = "",
+                        Fragment = ""
+                    };
+
+                    // Handle query string if present in evalUrl
+                    int queryIndex = evalUrl.IndexOf('?');
+                    if (queryIndex > -1)
+                    {
+                        builder.Path = evalUrl.Substring(0, queryIndex);
+                        builder.Query = evalUrl.Substring(queryIndex + 1);
+
+                        // Handle fragment in query string
+                        int fragmentIndex = builder.Query.IndexOf('#');
+                        if (fragmentIndex > -1)
+                        {
+                            builder.Query = builder.Query.Substring(0, fragmentIndex);
+                        }
+                    }
+
+                    normalizedUrl = builder.Uri.ToString();
+                }
+                else if (evalUrl.StartsWith("?"))
+                {
+                    // Query string only - append to base URL path
+                    var builder = new UriBuilder(baseUri)
+                    {
+                        Query = evalUrl.Substring(1),
+                        Fragment = ""
+                    };
+                    normalizedUrl = builder.Uri.ToString();
+                }
+                else if (evalUrl.StartsWith("#"))
+                {
+                    // Fragment only - return base URL without fragment
+                    var builder = new UriBuilder(baseUri) { Fragment = "" };
+                    normalizedUrl = builder.Uri.ToString();
+                }
+                else
+                {
+                    // Relative path (including ./ and ../)
+                    // Use Uri constructor but with explicit handling
+                    Uri combined = new Uri(baseUri, evalUrl);
+                    normalizedUrl = combined.ToString();
                 }
 
-                return combined.ToString();
+                // Final cleanup - remove any fragments
+                if (normalizedUrl.Contains("#"))
+                {
+                    int fragmentIndex = normalizedUrl.IndexOf('#');
+                    normalizedUrl = normalizedUrl.Substring(0, fragmentIndex);
+                }
+
+                return normalizedUrl;
             }
             catch (UriFormatException e)
             {

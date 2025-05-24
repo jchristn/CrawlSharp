@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Reflection.PortableExecutable;
     using System.Threading.Tasks;
     using CrawlSharp.Web;
     using GetSomeInput;
@@ -70,15 +71,16 @@
 
             Settings settings = new Settings();
             settings.Crawl.StartUrl = url;
+            settings.Crawl.FollowLinks = true;
             settings.Crawl.MaxParallelTasks = 16;
-            settings.Crawl.RestrictToChildUrls = false;
-            settings.Crawl.RestrictToSameDomain = false;
-            settings.Crawl.MaxCrawlDepth = 1;
+            settings.Crawl.RestrictToChildUrls = true;
+            settings.Crawl.RestrictToSameDomain = true;
+            settings.Crawl.MaxCrawlDepth = 4;
 
             WebCrawler crawler = new WebCrawler(settings);
             crawler.Logger = Console.WriteLine;
 
-            Console.WriteLine("Settings:" + Environment.NewLine + _Serializer.SerializeJson(settings, true));
+            Console.WriteLine("Using settings" + Environment.NewLine + _Serializer.SerializeJson(settings, true));
 
             long bytesCrawled = 0;
             int resourcesCrawled = 0;

@@ -581,7 +581,7 @@
             Disposes of resources used by the WebCrawler.
             </summary>
         </member>
-        <member name="M:CrawlSharp.Web.WebCrawler.Crawl">
+        <member name="M:CrawlSharp.Web.WebCrawler.Crawl(System.Net.Http.HttpMethod)">
             <summary>
             Crawl using the server and configuration defined in the supplied settings.
             </summary>
