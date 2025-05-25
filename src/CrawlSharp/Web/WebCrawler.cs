@@ -513,6 +513,12 @@
                                 Log("ignoring redirect response from URL " + normalizedUri);
                             }
                         }
+                        else if (resp.StatusCode == 429)
+                        {
+                            Log("throttle status " + resp.StatusCode + " for " + normalizedUri);
+
+                            if (_Settings.Crawl.ThrottleMs > 0) await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                        }
                         else
                         {
                             Log("status " + resp.StatusCode + " for URL " + normalizedUri);

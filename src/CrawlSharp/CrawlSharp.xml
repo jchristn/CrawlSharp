@@ -190,6 +190,11 @@
             Maximum number of tasks to run in parallel.  Default is 8.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.ThrottleMs">
+            <summary>
+            The number of milliseconds to delay when receiving a 429 response.
+            </summary>
+        </member>
         <member name="M:CrawlSharp.Web.CrawlSettings.#ctor">
             <summary>
             Authentication settings.

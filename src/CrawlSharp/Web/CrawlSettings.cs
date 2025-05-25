@@ -147,6 +147,22 @@ namespace CrawlSharp.Web
             }
         }
 
+        /// <summary>
+        /// The number of milliseconds to delay when receiving a 429 response.
+        /// </summary>
+        public int ThrottleMs
+        {
+            get
+            {
+                return _ThrottleMs;
+            }
+            set
+            {
+                if (value < 0) throw new ArgumentOutOfRangeException(nameof(ThrottleMs));
+                _ThrottleMs = value;
+            }
+        }
+
         #endregion
 
         #region Private-Members
@@ -157,6 +173,7 @@ namespace CrawlSharp.Web
         private int _MaxCrawlDepth = 5;
         private List<Regex> _ExcludeLinkPatterns = new List<Regex>();
         private int _MaxParallelTasks = 8;
+        private int _ThrottleMs = 100;
 
         #endregion
 
