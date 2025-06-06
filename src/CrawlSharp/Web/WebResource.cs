@@ -113,6 +113,11 @@
         }
 
         /// <summary>
+        /// Value from the ETag header.
+        /// </summary>
+        public string ETag { get; set; } = null;
+
+        /// <summary>
         /// MD5 of the content.
         /// </summary>
         public string MD5Hash { get; set; } = null;

@@ -530,6 +530,7 @@
                             ParentUrl = parentUrl,
                             Depth = depth,
                             Status = resp.StatusCode,
+                            ETag = GetEtag(resp),
                             MD5Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.MD5Hash(resp.DataAsBytes)) : null,
                             SHA1Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA1Hash(resp.DataAsBytes)) : null,
                             SHA256Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA256Hash(resp.DataAsBytes)) : null,
@@ -849,6 +850,22 @@
                 Log($"error normalizing URL '{relativeUrl}' with base URL '{baseUrl}': {e.Message}");
                 return null;
             }
+        }
+
+        private string GetEtag(RestResponse resp)
+        {
+            if (resp == null || resp.Headers == null || resp.Headers.Count < 1) return null;
+
+            string etagHeader = resp.Headers["ETag"];
+            if (string.IsNullOrEmpty(etagHeader)) return null;
+
+            string etag = etagHeader.Trim();
+            if (etag.StartsWith("W/")) etag = etag.Substring(2).Trim();
+
+            if (etag.Length >= 2 && etag.StartsWith("\"") && etag.EndsWith("\""))
+                return etag.Substring(1, etag.Length - 2);
+
+            return etag;
         }
 
         private bool IsExternalUrl(string baseUrl, string testUrl)

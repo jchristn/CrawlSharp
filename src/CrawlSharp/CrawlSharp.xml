@@ -639,6 +639,11 @@
             Content-type.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.WebResource.ETag">
+            <summary>
+            Value from the ETag header.
+            </summary>
+        </member>
         <member name="P:CrawlSharp.Web.WebResource.MD5Hash">
             <summary>
             MD5 of the content.
