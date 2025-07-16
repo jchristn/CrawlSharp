@@ -22,6 +22,7 @@ Content-Type: application/json
   "Crawl": {
     "UserAgent": "CrawlSharp",
     "StartUrl": "https://somehost.com",
+    "UseHeadlessBrowser": false,
     "IgnoreRobotsText": false,
     "IncludeSitemap": true,
     "FollowLinks": true,

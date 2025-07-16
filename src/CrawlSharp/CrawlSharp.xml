@@ -23,6 +23,28 @@
             <param name="stream">Stream.</param>
             <returns>MD5 hash.</returns>
         </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.MD5Hash(System.String)">
+            <summary>
+            Generate an MD5 hash of a string.
+            </summary>
+            <param name="str">String.</param>
+            <returns>MD5 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.MD5Hash(System.Collections.Generic.List{System.String})">
+            <summary>
+            Generate an MD5 hash of a list of strings.
+            </summary>
+            <param name="strings">Strings.</param>
+            <returns>MD5 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.MD5Hash(System.Data.DataTable)">
+            <summary>
+            Generate an MD5 hash of a DataTable.
+            This method concatenates column names (separated by a null character) and all cell values (separated by a null character).  Any null cells have their value replaced with the string NULL.
+            </summary>
+            <param name="dt">DataTable. </param>
+            <returns>MD5 hash.</returns>
+        </member>
         <member name="M:CrawlSharp.Helpers.HashHelper.SHA1Hash(System.Byte[])">
             <summary>
             Generate a SHA1 hash of a byte array.
@@ -37,6 +59,28 @@
             <param name="stream">Stream.</param>
             <returns>MD5 hash.</returns>
         </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA1Hash(System.String)">
+            <summary>
+            Generate a SHA1 hash of a string.
+            </summary>
+            <param name="str">String.</param>
+            <returns>SHA1 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA1Hash(System.Collections.Generic.List{System.String})">
+            <summary>
+            Generate a SHA1 hash of a list of strings.
+            </summary>
+            <param name="strings">Strings.</param>
+            <returns>SHA1 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA1Hash(System.Data.DataTable)">
+            <summary>
+            Generate a SHA1 hash of a DataTable.
+            This method concatenates column names (separated by a null character) and all cell values (separated by a null character).  Any null cells have their value replaced with the string NULL.
+            </summary>
+            <param name="dt">DataTable. </param>
+            <returns>SHA1 hash.</returns>
+        </member>
         <member name="M:CrawlSharp.Helpers.HashHelper.SHA256Hash(System.Byte[])">
             <summary>
             Generate a SHA256 hash of a byte array.
@@ -50,6 +94,28 @@
             </summary>
             <param name="stream">Stream.</param>
             <returns>MD5 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA256Hash(System.String)">
+            <summary>
+            Generate a SHA256 hash of a string.
+            </summary>
+            <param name="str">String.</param>
+            <returns>SHA256 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA256Hash(System.Collections.Generic.List{System.String})">
+            <summary>
+            Generate a SHA256 hash of a list of strings.
+            </summary>
+            <param name="strings">Strings.</param>
+            <returns>SHA256 hash.</returns>
+        </member>
+        <member name="M:CrawlSharp.Helpers.HashHelper.SHA256Hash(System.Data.DataTable)">
+            <summary>
+            Generate a SHA256 hash of a DataTable.
+            This method concatenates column names (separated by a null character) and all cell values (separated by a null character).  Any null cells have their value replaced with the string NULL.
+            </summary>
+            <param name="dt">DataTable. </param>
+            <returns>SHA256 hash.</returns>
         </member>
         <member name="T:CrawlSharp.Web.AuthenticationSettings">
             <summary>
@@ -129,6 +195,13 @@
         <member name="P:CrawlSharp.Web.CrawlSettings.StartUrl">
             <summary>
             Start URL.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.UseHeadlessBrowser">
+            <summary>
+            Boolean indicating whether or not a headless browser should be used.
+            Using a headless browser will make crawling of certain sites possible, specifically those that detect bots and disallow crawling.
+            Using a headless browser may require installation of certain dependencies (such as on Ubuntu Server).  Please refer to the README for details.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.IgnoreRobotsText">

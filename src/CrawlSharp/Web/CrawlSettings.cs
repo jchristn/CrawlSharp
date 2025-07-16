@@ -45,6 +45,13 @@ namespace CrawlSharp.Web
         }
 
         /// <summary>
+        /// Boolean indicating whether or not a headless browser should be used.
+        /// Using a headless browser will make crawling of certain sites possible, specifically those that detect bots and disallow crawling.
+        /// Using a headless browser may require installation of certain dependencies (such as on Ubuntu Server).  Please refer to the README for details.
+        /// </summary>
+        public bool UseHeadlessBrowser { get; set; } = false;
+
+        /// <summary>
         /// Boolean indicating whether or not the contents of the webserver's robots.txt file should be ignored.
         /// This value should remain false unless you are crawling web servers that you own and operate or you have been provided explicit permission to do so.
         /// </summary>

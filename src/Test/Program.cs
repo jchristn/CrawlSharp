@@ -37,7 +37,10 @@
                         ParseRobotsTextFile();
                         break;
                     case "crawl":
-                        await Crawl();
+                        await Crawl(false);
+                        break;
+                    case "headless":
+                        await Crawl(true);
                         break;
                 }
             }
@@ -52,6 +55,7 @@
             Console.WriteLine("?              help, this menu");
             Console.WriteLine("r              parse a robots.txt file");
             Console.WriteLine("crawl          crawl a URL");
+            Console.WriteLine("headless       crawl a URL using a headless browser");
             Console.WriteLine("");
         }
 
@@ -64,13 +68,14 @@
             Console.WriteLine(_Serializer.SerializeJson(robots, true));
         }
 
-        private static async Task Crawl()
+        private static async Task Crawl(bool headless = false)
         {
             string url = Inputty.GetString("URL:", null, true);
             if (String.IsNullOrEmpty(url)) return;
 
             Settings settings = new Settings();
             settings.Crawl.StartUrl = url;
+            settings.Crawl.UseHeadlessBrowser = headless;
             settings.Crawl.FollowLinks = true;
             settings.Crawl.MaxParallelTasks = 16;
             settings.Crawl.RestrictToChildUrls = true;
