@@ -9,6 +9,7 @@ CrawlSharp is a library and integrated webserver for crawling basic web content.
 ## New in v1.0.x   
 
 - Initial release
+- Added support for headless browser crawling (using `Microsoft.Playwright`)
 
 ## Bugs, Feedback, or Enhancement Requests
 
@@ -23,6 +24,7 @@ using CrawlSharp;
 
 Settings settings = new Settings();
 settings.Crawl.StartUrl = "http://www.mywebpage.com";
+settings.Crawl.UseHeadlessBrowser = true; // slow but useful for sites that block bots or where content must be rendered
 
 using (WebCrawler crawler = new WebCrawler(settings))
 {
@@ -93,6 +95,41 @@ Refer to `REST_API.md` for more information about using the RESTful API.
 ## Running in Docker
 
 A Docker image is available in [Docker Hub](https://hub.docker.com/r/jchristn/crawlsharp) under `jchristn/crawlsharp`.  Use the Docker Compose start (`compose-up.sh` and `compose-up.bat`) and stop (`compose-down.sh` and `compose-down.bat`) scripts in the `Docker` directory if you wish to run within Docker Compose. 
+
+## Using Headless Browser
+
+CrawlSharp can use `Microsoft.Playwright` to crawl content to overcome challenging websites that detect and block bots or require content to be rendered from Javascript.  If you run this code on an Ubuntu machine, use the following script to install dependencies that will be required.  Also note that the `$HOME` directory must be owned by the user running the code.
+
+```
+#!/bin/bash
+
+# Detect Ubuntu version
+VERSION=$(lsb_release -rs)
+
+if [[ "$VERSION" == "24.04" ]]; then
+    # Ubuntu 24.04 packages
+    PACKAGES="libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libcups2t64 libgtk-3-0t64"
+else
+    # Ubuntu 22.04 and earlier
+    PACKAGES="libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libgtk-3-0"
+fi
+
+# Install common packages plus version-specific ones
+sudo apt-get update
+sudo apt-get install -y \
+    $PACKAGES \
+    libnspr4 \
+    libnss3 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libxss1 \
+    fonts-liberation \
+    ca-certificates
+```
 
 ## Version History
 
