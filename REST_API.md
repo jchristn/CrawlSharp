@@ -28,7 +28,11 @@ Content-Type: application/json
     "FollowLinks": true,
     "FollowRedirects": true,
     "RestrictToChildUrls": false,
-    "MaxCrawlDepth": 3,
+    "RestrictToSameSubdomain": false,
+    "RestrictToSameRootDomain": true,
+    "AllowedDomains": [],
+    "DeniedDomains": [],
+    "MaxCrawlDepth": 2,
     "MaxParallelTasks": 16,
     "ExcludeLinkPatterns": [],
     "FollowExternalLinks": true

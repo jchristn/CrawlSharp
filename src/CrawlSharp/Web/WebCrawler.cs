@@ -1,27 +1,23 @@
 ﻿namespace CrawlSharp.Web
 {
+    using System;
+    using System.Collections.Generic;
+    using System.Collections.Specialized;
+    using System.IO;
+    using System.Linq;
+    using System.Net.Http;
+    using System.Runtime.CompilerServices;
+    using System.Text;
+    using System.Threading;
+    using System.Threading.Tasks;
+
     using CrawlSharp.Helpers;
     using HtmlAgilityPack;
     using Microsoft.Playwright;
+    using Nager.PublicSuffix;
+    using Nager.PublicSuffix.RuleProviders;
     using RestWrapper;
     using SerializationHelper;
-    using System;
-    using System.Collections;
-    using System.Collections.Concurrent;
-    using System.Collections.Generic;
-    using System.Collections.Specialized;
-    using System.ComponentModel.DataAnnotations;
-    using System.IO;
-    using System.Linq;
-    using System.Net;
-    using System.Net.Http;
-    using System.Reflection.Metadata.Ecma335;
-    using System.Reflection.PortableExecutable;
-    using System.Runtime.CompilerServices;
-    using System.Text;
-    using System.Text.RegularExpressions;
-    using System.Threading;
-    using System.Threading.Tasks;
 
     /// <summary>
     /// Web crawler.
@@ -132,6 +128,8 @@
 
         private IPlaywright _IPlaywright = null;
         private IBrowser _IBrowser = null;
+        
+        private static IDomainParser _DomainParser = null;
 
         private CancellationToken _Token;
         private Task _QueueProcessor = null;
@@ -150,6 +148,13 @@
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Semaphore = new SemaphoreSlim(_Settings.Crawl.MaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
             _Token = token;
+
+            if (_Settings.Crawl.RestrictToSameRootDomain)
+            {
+                LocalFileRuleProvider ruleProvider = new LocalFileRuleProvider("public_suffix_list.dat");
+                ruleProvider.BuildAsync().Wait();
+                _DomainParser = new DomainParser(ruleProvider);
+            }
 
             if (_Settings.Crawl.UseHeadlessBrowser)
             {
@@ -1034,7 +1039,7 @@
             return false;
         }
 
-        private bool IsSameDomain(string url1, string url2)
+        private bool IsSameSubdomain(string url1, string url2)
         {
             // Handle null or empty inputs
             if (string.IsNullOrWhiteSpace(url1) || string.IsNullOrWhiteSpace(url2)) return false;
@@ -1074,6 +1079,50 @@
             }
         }
 
+        private bool IsSameRootDomain(string url1, string url2)
+        {
+            // Handle null or empty inputs
+            if (string.IsNullOrWhiteSpace(url1) || string.IsNullOrWhiteSpace(url2)) return false;
+            if (_DomainParser == null) return false;
+
+            try
+            {
+                Uri url1Uri = new Uri(url1);
+                if (url2.StartsWith("/")) return true;
+
+                else if (url2.StartsWith("./") || url2.StartsWith("../") ||
+                        (!url2.Contains("://") && !url2.StartsWith("//")))
+                {
+                    // Relative URL, so it's the same domain
+                    return true;
+                }
+
+                // If url2 starts with "//", it's protocol-relative, so prepend the scheme from url1
+                if (url2.StartsWith("//"))
+                {
+                    url2 = $"{url1Uri.Scheme}:{url2}";
+                }
+
+                Uri url2Uri = new Uri(url2);
+
+                // Parse the domains using Nager.PublicSuffix
+                var domainInfo1 = _DomainParser.Parse(url1Uri.Host);
+                var domainInfo2 = _DomainParser.Parse(url2Uri.Host);
+
+                if (domainInfo1 == null || domainInfo2 == null)
+                {
+                    // Fallback to exact host comparison if parsing fails
+                    return string.Equals(url1Uri.Host, url2Uri.Host, StringComparison.OrdinalIgnoreCase);
+                }
+
+                return string.Equals(domainInfo1.RegistrableDomain, domainInfo2.RegistrableDomain, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+        }
+
         private bool IsAllowedDomain(string baseUrl, List<string> allowedDomains)
         {
             if (allowedDomains == null || allowedDomains.Count < 1) return true;
@@ -1102,6 +1151,33 @@
             catch (UriFormatException)
             {
                 return false;
+            }
+        }
+
+        private bool IsDeniedDomain(string baseUrl, List<string> deniedDomains)
+        {
+            if (deniedDomains == null || deniedDomains.Count < 1) return false;
+
+            if (String.IsNullOrEmpty(baseUrl))
+            {
+                Log("checking denied domains and received an empty base URL");
+                return true; // Empty URLs are denied for safety
+            }
+
+            // Relative URLs are not denied (they stay within the current domain)
+            if (!baseUrl.Contains("://") && !baseUrl.StartsWith("//")) return false;
+            if (baseUrl.StartsWith("./")) return false;
+
+            try
+            {
+                if (baseUrl.StartsWith("//")) baseUrl = "http:" + baseUrl;
+                Uri uri = new Uri(baseUrl);
+                string domain = uri.Host.ToLowerInvariant();
+                return deniedDomains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase));
+            }
+            catch (UriFormatException)
+            {
+                return true;
             }
         }
 
@@ -1392,6 +1468,12 @@
                                             continue;
                                         }
 
+                                        if (IsDeniedDomain(currTrimmed, _Settings.Crawl.DeniedDomains))
+                                        {
+                                            Log("avoiding denied domain in link " + currTrimmed);
+                                            continue;
+                                        }
+
                                         Uri childUri;
                                         try
                                         {
@@ -1409,10 +1491,15 @@
                                             continue;
                                         }
 
-                                        // Continue with domain/path checks...
-                                        if (_Settings.Crawl.RestrictToSameDomain && !IsSameDomain(_Settings.Crawl.StartUrl, currTrimmed))
+                                        if (_Settings.Crawl.RestrictToSameRootDomain && !IsSameRootDomain(_Settings.Crawl.StartUrl, currTrimmed))
                                         {
-                                            Log("avoiding link not in start URL domain " + currTrimmed);
+                                            Log("avoiding link not in root domain " + currTrimmed);
+                                            continue;
+                                        }
+
+                                        if (_Settings.Crawl.RestrictToSameSubdomain && !IsSameSubdomain(_Settings.Crawl.StartUrl, currTrimmed))
+                                        {
+                                            Log("avoiding link not in subdomain " + currTrimmed);
                                             continue;
                                         }
 

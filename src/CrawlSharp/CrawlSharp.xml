@@ -231,15 +231,27 @@
             Option is only valid when FollowLinks is set to true.
             </summary>
         </member>
-        <member name="P:CrawlSharp.Web.CrawlSettings.RestrictToSameDomain">
+        <member name="P:CrawlSharp.Web.CrawlSettings.RestrictToSameSubdomain">
             <summary>
-            Boolean indicating if only links that are within the same domain to the entry URL should be followed.
+            Boolean indicating if only links that are within the same subdomain to the entry URL should be followed.
+            Option is only valid when FollowLinks is set to true.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RestrictToSameRootDomain">
+            <summary>
+            Boolean indicating if only links that are within the same root domain to the entry URL should be followed.
             Option is only valid when FollowLinks is set to true.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.AllowedDomains">
             <summary>
             List of allowed domains.  If empty, all domains will be allowed.  Otherwise, only the domains specified here will be allowed.
+            Option is only valid when FollowLinks is set to true.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.DeniedDomains">
+            <summary>
+            List of denied domains.  If empty, no domains will be denied.  Otherwise, only the domains specified here will be denied.
             Option is only valid when FollowLinks is set to true.
             </summary>
         </member>

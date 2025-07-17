@@ -70,7 +70,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
 
 # Expose port (adjust as needed)
-EXPOSE 8080
+EXPOSE 8000
 
 # Set the entry point
 ENTRYPOINT ["dotnet", "CrawlSharp.Server.dll", "*", "8000"]

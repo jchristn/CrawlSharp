@@ -79,7 +79,7 @@
             settings.Crawl.FollowLinks = true;
             settings.Crawl.MaxParallelTasks = 16;
             settings.Crawl.RestrictToChildUrls = true;
-            settings.Crawl.RestrictToSameDomain = true;
+            settings.Crawl.RestrictToSameSubdomain = true;
             settings.Crawl.MaxCrawlDepth = 4;
 
             WebCrawler crawler = new WebCrawler(settings);

@@ -79,10 +79,16 @@ namespace CrawlSharp.Web
         public bool RestrictToChildUrls { get; set; } = true;
 
         /// <summary>
-        /// Boolean indicating if only links that are within the same domain to the entry URL should be followed.
+        /// Boolean indicating if only links that are within the same subdomain to the entry URL should be followed.
         /// Option is only valid when FollowLinks is set to true.
         /// </summary>
-        public bool RestrictToSameDomain { get; set; } = true;
+        public bool RestrictToSameSubdomain { get; set; } = true;
+
+        /// <summary>
+        /// Boolean indicating if only links that are within the same root domain to the entry URL should be followed.
+        /// Option is only valid when FollowLinks is set to true.
+        /// </summary>
+        public bool RestrictToSameRootDomain { get; set; } = true;
 
         /// <summary>
         /// List of allowed domains.  If empty, all domains will be allowed.  Otherwise, only the domains specified here will be allowed.
@@ -98,6 +104,23 @@ namespace CrawlSharp.Web
             {
                 if (value == null) value = new List<string>();
                 _AllowedDomains = value;
+            }
+        }
+
+        /// <summary>
+        /// List of denied domains.  If empty, no domains will be denied.  Otherwise, only the domains specified here will be denied.
+        /// Option is only valid when FollowLinks is set to true.
+        /// </summary>
+        public List<string> DeniedDomains
+        {
+            get
+            {
+                return _DeniedDomains;
+            }
+            set
+            {
+                if (value == null) value = new List<string>();
+                _DeniedDomains = value;
             }
         }
 
@@ -177,6 +200,7 @@ namespace CrawlSharp.Web
         private string _UserAgent = "CrawlSharp";
         private string _StartUrl = null;
         private List<string> _AllowedDomains = new List<string>();
+        private List<string> _DeniedDomains = new List<string>();
         private int _MaxCrawlDepth = 5;
         private List<Regex> _ExcludeLinkPatterns = new List<Regex>();
         private int _MaxParallelTasks = 8;

@@ -131,6 +131,10 @@ sudo apt-get install -y \
     ca-certificates
 ```
 
+## Third-Party Data
+
+CrawlSharp is licensed under MIT and uses the [Nager.PublicSuffix](https://github.com/nager/Nager.PublicSuffix) library (MIT license) for domain matching coupled with [third-party public suffix data](https://publicsuffix.org/list/public_suffix_list.dat) (Mozilla Public License v2.0).  Please be aware of the license for this information.
+
 ## Version History
 
 Please refer to ```CHANGELOG.md``` for version history.
