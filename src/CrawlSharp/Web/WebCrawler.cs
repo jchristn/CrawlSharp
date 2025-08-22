@@ -128,7 +128,7 @@
 
         private IPlaywright _IPlaywright = null;
         private IBrowser _IBrowser = null;
-        
+
         private static IDomainParser _DomainParser = null;
 
         private CancellationToken _Token;
@@ -389,6 +389,306 @@
             return req;
         }
 
+        private async Task<ContentTypeInfo> CheckContentTypeAsync(string url, CancellationToken token)
+        {
+            ContentTypeInfo result = new ContentTypeInfo
+            {
+                IsNavigable = true,  // Default to navigable if check fails
+                MediaType = null,
+                ContentLength = null,
+                CheckSucceeded = false
+            };
+
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd(_Settings.Crawl.UserAgent);
+                client.Timeout = TimeSpan.FromSeconds(10);
+
+                var request = new HttpRequestMessage(HttpMethod.Head, url);
+
+                // Add authentication headers if needed
+                if (_Settings.Authentication.Type == AuthenticationTypeEnum.ApiKey
+                    && !String.IsNullOrEmpty(_Settings.Authentication.ApiKeyHeader))
+                {
+                    request.Headers.Add(_Settings.Authentication.ApiKeyHeader, _Settings.Authentication.ApiKey);
+                }
+                else if (_Settings.Authentication.Type == AuthenticationTypeEnum.Basic)
+                {
+                    var authBytes = Encoding.ASCII.GetBytes($"{_Settings.Authentication.Username}:{_Settings.Authentication.Password}");
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
+                }
+                else if (_Settings.Authentication.Type == AuthenticationTypeEnum.BearerToken)
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _Settings.Authentication.BearerToken);
+                }
+
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    result.MediaType = response.Content.Headers.ContentType?.MediaType?.ToLower() ?? "";
+                    result.ContentLength = response.Content.Headers.ContentLength;
+                    result.CheckSucceeded = true;
+
+                    // Determine if content is navigable based on Content-Type header
+                    // Only HTML-like content is considered navigable
+                    result.IsNavigable = IsNavigableContentType(result.MediaType);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't throw - we'll default to navigable
+                Log($"Content type check failed for {url}: {ex.Message}");
+            }
+
+            return result;
+        }
+
+        private bool IsNavigableContentType(string contentType)
+        {
+            if (string.IsNullOrEmpty(contentType))
+                return true; // Default to navigable if no content type
+
+            contentType = contentType.ToLower();
+
+            // Only these content types should be navigated to in a browser
+            // Everything else should be downloaded directly
+            return contentType.Contains("text/html") ||
+                   contentType.Contains("application/xhtml+xml") ||
+                   contentType.Contains("application/xml") ||
+                   contentType.Contains("text/xml") ||
+                   (contentType.Contains("text/plain") && !contentType.Contains("charset")) || // Plain text might be HTML
+                   contentType == "text/plain"; // Sometimes HTML is served as text/plain
+        }
+
+        private async Task<WebResource> RetrieveWithRestClient(Uri normalizedUri, string parentUrl, int depth, string contentType, CancellationToken token)
+        {
+            using (RestRequest req = RequestBuilder(normalizedUri.ToString()))
+            {
+                using (RestResponse resp = await req.SendAsync(token).ConfigureAwait(false))
+                {
+                    if (resp == null)
+                    {
+                        Log("unable to retrieve " + normalizedUri);
+
+                        WebResource failedResource = new WebResource
+                        {
+                            Url = normalizedUri.ToString(),
+                            ParentUrl = parentUrl,
+                            Depth = depth,
+                            Status = 0,
+                            ContentType = contentType
+                        };
+
+                        AddAlreadyVisited(normalizedUri, failedResource);
+                        return failedResource;
+                    }
+
+                    if (resp.StatusCode >= 300 && resp.StatusCode <= 308)
+                    {
+                        Log("redirect status " + resp.StatusCode + " for URL " + normalizedUri);
+
+                        if (_Settings.Crawl.FollowRedirects)
+                        {
+                            string redirectLocation = resp.Headers.AllKeys
+                                .FirstOrDefault(k => string.Equals(k, "Location", StringComparison.OrdinalIgnoreCase))
+                                is string key ? resp.Headers[key] : null;
+
+                            if (String.IsNullOrEmpty(redirectLocation))
+                            {
+                                Log("unable to retrieve redirect location from response for URL " + normalizedUri);
+                            }
+                            else
+                            {
+                                string redirectNormalizedUrl = NormalizeUrl(normalizedUri.ToString(), redirectLocation);
+
+                                Uri redirectUri;
+                                try
+                                {
+                                    redirectUri = new Uri(redirectNormalizedUrl);
+                                    if (!String.IsNullOrEmpty(redirectUri.Fragment))
+                                    {
+                                        UriBuilder builder = new UriBuilder(redirectUri);
+                                        builder.Fragment = "";
+                                        redirectUri = builder.Uri;
+                                    }
+                                }
+                                catch (UriFormatException ufe)
+                                {
+                                    Exception?.Invoke(redirectNormalizedUrl, ufe);
+                                    Log("invalid redirect URI format: " + redirectNormalizedUrl);
+
+                                    WebResource invalidRedirectResource = new WebResource
+                                    {
+                                        Url = normalizedUri.ToString(),
+                                        ParentUrl = parentUrl,
+                                        Depth = depth,
+                                        Status = resp.StatusCode,
+                                        ContentType = GetContentTypeFromHeaders(resp.Headers),
+                                        Headers = resp.Headers,
+                                        Data = resp.DataAsBytes
+                                    };
+
+                                    AddAlreadyVisited(normalizedUri, invalidRedirectResource);
+                                    return invalidRedirectResource;
+                                }
+
+                                if (IsAlreadyVisited(redirectUri))
+                                {
+                                    Log("redirect to already visited URL " + redirectUri + " from " + normalizedUri);
+                                    WebResource alreadyVisited = GetAlreadyVisited(redirectUri);
+                                    AddAlreadyVisited(normalizedUri, alreadyVisited);
+                                    return alreadyVisited;
+                                }
+
+                                Log("following redirect for URL " + normalizedUri + " to " + redirectUri);
+                                WebResource redirectedResource = await RetrieveWebResource(redirectUri.ToString(), parentUrl, depth, token).ConfigureAwait(false);
+
+                                if (redirectedResource != null)
+                                {
+                                    AddAlreadyVisited(normalizedUri, redirectedResource);
+                                }
+
+                                return redirectedResource;
+                            }
+                        }
+                        else
+                        {
+                            Log("ignoring redirect response from URL " + normalizedUri);
+                        }
+                    }
+                    else if (resp.StatusCode == 429)
+                    {
+                        Log("throttle status " + resp.StatusCode + " for " + normalizedUri);
+                        if (_Settings.Crawl.ThrottleMs > 0)
+                            await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        Log("status " + resp.StatusCode + " for URL " + normalizedUri);
+                    }
+
+                    WebResource resource = new WebResource
+                    {
+                        Url = normalizedUri.ToString(),
+                        ParentUrl = parentUrl,
+                        Depth = depth,
+                        Status = resp.StatusCode,
+                        ContentType = contentType ?? GetContentTypeFromHeaders(resp.Headers),
+                        ETag = GetEtag(resp),
+                        MD5Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.MD5Hash(resp.DataAsBytes)) : null,
+                        SHA1Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA1Hash(resp.DataAsBytes)) : null,
+                        SHA256Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA256Hash(resp.DataAsBytes)) : null,
+                        Headers = resp.Headers,
+                        Data = resp.DataAsBytes
+                    };
+
+                    AddAlreadyVisited(normalizedUri, resource);
+                    return resource;
+                }
+            }
+        }
+
+        private async Task<WebResource> RetrieveWithPlaywright(Uri normalizedUri, string parentUrl, int depth, string contentType, CancellationToken token)
+        {
+            await using var context = await _IBrowser.NewContextAsync(new BrowserNewContextOptions
+            {
+                UserAgent = _Settings.Crawl.UserAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
+                Locale = "en-US",
+                TimezoneId = "America/New_York",
+                AcceptDownloads = false
+            });
+
+            var page = await context.NewPageAsync();
+
+            // Track if a download was initiated
+            bool downloadInitiated = false;
+            page.Download += (sender, e) =>
+            {
+                downloadInitiated = true;
+            };
+
+            try
+            {
+                IResponse response = null;
+
+                try
+                {
+                    response = await page.GotoAsync(normalizedUri.ToString(), new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.Load,
+                        Timeout = 30000
+                    });
+                }
+                catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
+                {
+                    // Download was triggered, fall back to REST client
+                    Log("Download triggered for " + normalizedUri + ", using REST client");
+                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                }
+
+                // Check if download was initiated during navigation
+                if (downloadInitiated)
+                {
+                    Log("Download initiated for " + normalizedUri + ", using REST client");
+                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                }
+
+                if (response == null)
+                {
+                    Log("No response received for " + normalizedUri);
+                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                }
+
+                if (response.Status == 429)
+                {
+                    Log("throttle status " + response.Status + " for " + normalizedUri);
+                    if (_Settings.Crawl.ThrottleMs > 0)
+                        await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    Log("status " + response.Status + " for URL " + normalizedUri);
+                }
+
+                string content = await page.ContentAsync();
+                var headers = await response.AllHeadersAsync();
+
+                NameValueCollection headerCollection = new NameValueCollection();
+                foreach (var header in headers)
+                {
+                    headerCollection.Add(header.Key, header.Value);
+                }
+
+                WebResource resource = new WebResource
+                {
+                    Url = normalizedUri.ToString(),
+                    ParentUrl = parentUrl,
+                    Depth = depth,
+                    Status = response.Status,
+                    ContentType = contentType ?? GetContentTypeFromHeaders(headerCollection),
+                    ETag = headers.ContainsKey("etag") ? headers["etag"] : null,
+                    MD5Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.MD5Hash(content)) : null,
+                    SHA1Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA1Hash(content)) : null,
+                    SHA256Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA256Hash(content)) : null,
+                    Headers = headerCollection,
+                    Data = !String.IsNullOrEmpty(content) ? Encoding.UTF8.GetBytes(content) : Array.Empty<byte>()
+                };
+
+                AddAlreadyVisited(normalizedUri, resource);
+                return resource;
+            }
+            finally
+            {
+                if (page != null && !page.IsClosed)
+                {
+                    await page.CloseAsync();
+                }
+            }
+        }
+
         private async Task<WebResource> RetrieveWebResource(string url, string parentUrl, int depth, CancellationToken token = default)
         {
             try
@@ -402,7 +702,6 @@
                     return null;
                 }
 
-                // Use case-insensitive comparison for HTTP/HTTPS check
                 if (!fullUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
                     !fullUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
@@ -410,7 +709,6 @@
                     return null;
                 }
 
-                // Create Uri without fragments
                 Uri normalizedUri;
                 try
                 {
@@ -443,203 +741,29 @@
 
                 Log("retrieving " + normalizedUri);
 
-                WebResource wr;
-
-                if (!_Settings.Crawl.UseHeadlessBrowser)
+                // Check content type to determine retrieval method
+                ContentTypeInfo contentInfo = null;
+                if (_Settings.Crawl.UseHeadlessBrowser)
                 {
-                    using (RestRequest req = RequestBuilder(normalizedUri.ToString()))
+                    contentInfo = await CheckContentTypeAsync(normalizedUri.ToString(), token);
+
+                    if (contentInfo.CheckSucceeded)
                     {
-                        using (RestResponse resp = await req.SendAsync(token).ConfigureAwait(false))
-                        {
-                            if (resp == null)
-                            {
-                                Log("unable to retrieve " + normalizedUri);
-
-                                wr = new WebResource
-                                {
-                                    Url = normalizedUri.ToString(),
-                                    ParentUrl = parentUrl,
-                                    Depth = depth,
-                                    Status = 0
-                                };
-
-                                AddAlreadyVisited(normalizedUri, wr);
-
-                                return wr;
-                            }
-
-                            if (resp.StatusCode >= 300 && resp.StatusCode <= 308)
-                            {
-                                Log("redirect status " + resp.StatusCode + " for URL " + normalizedUri);
-
-                                if (_Settings.Crawl.FollowRedirects)
-                                {
-                                    string redirectLocation = resp.Headers.AllKeys
-                                        .FirstOrDefault(k => string.Equals(k, "Location", StringComparison.OrdinalIgnoreCase))
-                                        is string key ? resp.Headers[key] : null;
-
-                                    if (String.IsNullOrEmpty(redirectLocation))
-                                    {
-                                        Log("unable to retrieve redirect location from response for URL " + normalizedUri);
-                                    }
-                                    else
-                                    {
-                                        string redirectNormalizedUrl = NormalizeUrl(normalizedUri.ToString(), redirectLocation);
-
-                                        Uri redirectUri;
-                                        try
-                                        {
-                                            redirectUri = new Uri(redirectNormalizedUrl);
-                                            if (!String.IsNullOrEmpty(redirectUri.Fragment))
-                                            {
-                                                UriBuilder builder = new UriBuilder(redirectUri);
-                                                builder.Fragment = "";
-                                                redirectUri = builder.Uri;
-                                            }
-                                        }
-                                        catch (UriFormatException ufe)
-                                        {
-                                            Exception?.Invoke(redirectNormalizedUrl, ufe);
-                                            Log("invalid redirect URI format: " + redirectNormalizedUrl);
-
-                                            // Still need to return something for this URL
-                                            wr = new WebResource
-                                            {
-                                                Url = normalizedUri.ToString(),
-                                                ParentUrl = parentUrl,
-                                                Depth = depth,
-                                                Status = resp.StatusCode,
-                                                Headers = resp.Headers,
-                                                Data = resp.DataAsBytes
-                                            };
-
-                                            AddAlreadyVisited(normalizedUri, wr);
-                                            return wr;
-                                        }
-
-                                        // Check if we're being redirected to a URL we've already visited
-                                        if (IsAlreadyVisited(redirectUri))
-                                        {
-                                            Log("redirect to already visited URL " + redirectUri + " from " + normalizedUri);
-
-                                            // Store a reference to the redirect target for the original URL
-                                            WebResource alreadyVisited = GetAlreadyVisited(redirectUri);
-                                            AddAlreadyVisited(normalizedUri, alreadyVisited);
-                                            return alreadyVisited;
-                                        }
-
-                                        Log("following redirect for URL " + normalizedUri + " to " + redirectUri);
-                                        WebResource redirectedResource = await RetrieveWebResource(redirectUri.ToString(), parentUrl, depth, token).ConfigureAwait(false);
-
-                                        // Store a reference to the redirect target for the original URL
-                                        if (redirectedResource != null)
-                                        {
-                                            AddAlreadyVisited(normalizedUri, redirectedResource);
-                                        }
-
-                                        return redirectedResource;
-                                    }
-                                }
-                                else
-                                {
-                                    Log("ignoring redirect response from URL " + normalizedUri);
-                                }
-                            }
-                            else if (resp.StatusCode == 429)
-                            {
-                                Log("throttle status " + resp.StatusCode + " for " + normalizedUri);
-
-                                if (_Settings.Crawl.ThrottleMs > 0) await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                Log("status " + resp.StatusCode + " for URL " + normalizedUri);
-                            }
-
-                            wr = new WebResource
-                            {
-                                Url = normalizedUri.ToString(),
-                                ParentUrl = parentUrl,
-                                Depth = depth,
-                                Status = resp.StatusCode,
-                                ETag = GetEtag(resp),
-                                MD5Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.MD5Hash(resp.DataAsBytes)) : null,
-                                SHA1Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA1Hash(resp.DataAsBytes)) : null,
-                                SHA256Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA256Hash(resp.DataAsBytes)) : null,
-                                Headers = resp.Headers,
-                                Data = resp.DataAsBytes
-                            };
-
-                            AddAlreadyVisited(normalizedUri, wr);
-
-                            return wr;
-                        }
+                        Log($"Content type check for {normalizedUri}: MediaType={contentInfo.MediaType}, IsNavigable={contentInfo.IsNavigable}");
                     }
+                }
+
+                // Decide which method to use for retrieval
+                bool usePlaywright = _Settings.Crawl.UseHeadlessBrowser &&
+                                    (contentInfo == null || contentInfo.IsNavigable);
+
+                if (usePlaywright)
+                {
+                    return await RetrieveWithPlaywright(normalizedUri, parentUrl, depth, contentInfo?.MediaType, token);
                 }
                 else
                 {
-                    await using var context = await _IBrowser.NewContextAsync(new BrowserNewContextOptions
-                    {
-                        UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
-                        Locale = "en-US",
-                        TimezoneId = "America/New_York"
-                    });
-
-                    var page = await context.NewPageAsync();
-                    try
-                    {
-                        var response = await page.GotoAsync(url);
-
-                        if (response.Status == 429)
-                        {
-                            Log("throttle status " + response.Status + " for " + normalizedUri);
-
-                            if (_Settings.Crawl.ThrottleMs > 0) await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            Log("status " + response.Status + " for URL " + normalizedUri);
-                        }
-
-                        string etag = null;                         
-                        Dictionary<string, string> headers = await response.AllHeadersAsync();
-                        NameValueCollection headerCollection = new NameValueCollection();
-
-                        if (headers != null && headers.Count > 0)
-                        {
-                            foreach (KeyValuePair<string, string> header in headers)
-                            {
-                                headerCollection.Add(header.Key, header.Value);
-                            }
-                        }
-
-                        if (headers.ContainsKey("etag")) etag = headers["etag"];
-
-                        string content = await page.ContentAsync();
-
-                        wr = new WebResource
-                        {
-                            Url = normalizedUri.ToString(),
-                            ParentUrl = parentUrl,
-                            Depth = depth,
-                            Status = response.Status,
-                            ETag = etag,
-                            MD5Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.MD5Hash(content)) : null,
-                            SHA1Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA1Hash(content)) : null,
-                            SHA256Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA256Hash(content)) : null,
-                            Headers = headerCollection,
-                            Data = !String.IsNullOrEmpty(content) ? Encoding.UTF8.GetBytes(content) : Array.Empty<byte>()
-                        };
-
-                        AddAlreadyVisited(normalizedUri, wr);
-
-                        return wr;
-                    }
-                    finally
-                    {
-                        await page.CloseAsync();
-                    }
+                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentInfo?.MediaType, token);
                 }
             }
             catch (IOException ioe)
@@ -662,6 +786,20 @@
             }
         }
 
+        private string GetContentTypeFromHeaders(NameValueCollection headers)
+        {
+            if (headers == null) return null;
+
+            string contentType = headers["Content-Type"];
+            if (string.IsNullOrEmpty(contentType)) return null;
+
+            // Extract just the media type, ignoring charset and other parameters
+            int semicolonIndex = contentType.IndexOf(';');
+            return semicolonIndex > 0
+                ? contentType.Substring(0, semicolonIndex).Trim().ToLower()
+                : contentType.Trim().ToLower();
+        }
+
         private async Task RetrieveRobotsFile(string baseUrl, CancellationToken token = default)
         {
             if (_Settings.Crawl.IgnoreRobotsText)
@@ -672,9 +810,9 @@
 
             if (String.IsNullOrEmpty(baseUrl)) return;
 
-            string robotsFile = baseUrl;
-            if (!robotsFile.EndsWith("/")) robotsFile += "/robots.txt";
-            else robotsFile += "robots.txt";
+            // CHANGE: Use domain root instead of the starting URL
+            string domainRoot = GetDomainRoot(baseUrl);
+            string robotsFile = domainRoot + "/robots.txt";
 
             WebResource robots = await RetrieveWebResource(robotsFile, baseUrl, 0, token).ConfigureAwait(false);
             if (robots != null
@@ -709,9 +847,9 @@
 
             if (String.IsNullOrEmpty(baseUrl)) return;
 
-            string sitemapUrl = baseUrl;
-            if (!sitemapUrl.EndsWith("/")) sitemapUrl += "/sitemap.xml";
-            else sitemapUrl += "sitemap.xml";
+            // CHANGE: Use domain root instead of the starting URL
+            string domainRoot = GetDomainRoot(baseUrl);
+            string sitemapUrl = domainRoot + "/sitemap.xml";
 
             WebResource sitemap = await RetrieveWebResource(sitemapUrl, baseUrl, 0, token).ConfigureAwait(false);
             if (sitemap != null
@@ -761,7 +899,7 @@
             }
             else
             {
-                Log("unable to retrieve sitemap.xml from " + sitemap);
+                Log("unable to retrieve sitemap.xml from " + sitemapUrl);  // CHANGE: Fixed log message
             }
         }
 
@@ -775,11 +913,26 @@
         {
             try
             {
-                string htmlContent = Encoding.UTF8.GetString(bytes);
+                string content = Encoding.UTF8.GetString(bytes);
+
+                // Quick validation that this is actually HTML-like content
+                string trimmedContent = content.TrimStart();
+                bool looksLikeHtml = trimmedContent.StartsWith("<", StringComparison.OrdinalIgnoreCase) ||
+                                     trimmedContent.StartsWith("<!DOCTYPE", StringComparison.OrdinalIgnoreCase) ||
+                                     trimmedContent.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
+                                     trimmedContent.Contains("<body", StringComparison.OrdinalIgnoreCase) ||
+                                     trimmedContent.Contains("<head", StringComparison.OrdinalIgnoreCase);
+
+                if (!looksLikeHtml)
+                {
+                    return new List<string>();
+                }
+
                 var doc = new HtmlAgilityPack.HtmlDocument();
-                doc.LoadHtml(htmlContent);
+                doc.LoadHtml(content);
                 HtmlNodeCollection linkNodes = doc.DocumentNode.SelectNodes("//a[@href]");
                 List<string> links = new List<string>();
+
                 if (linkNodes != null)
                 {
                     foreach (var link in linkNodes)
@@ -787,7 +940,6 @@
                         string href = link.GetAttributeValue("href", string.Empty);
                         if (!string.IsNullOrWhiteSpace(href))
                         {
-                            // Normalize the URL immediately when extracting
                             string normalizedUrl = NormalizeUrl(url, href);
                             if (!String.IsNullOrEmpty(normalizedUrl))
                             {
@@ -801,17 +953,15 @@
             }
             catch (Exception)
             {
-                return null;
+                return new List<string>();
             }
         }
 
         private string NormalizeUrl(string baseUrl, string relativeUrl)
         {
-            // Handle null or empty cases
             if (string.IsNullOrWhiteSpace(relativeUrl))
                 return null;
 
-            // Trim whitespace
             relativeUrl = relativeUrl.Trim();
             baseUrl = baseUrl?.Trim();
 
@@ -835,7 +985,6 @@
                 try
                 {
                     Uri absUri = new Uri(relativeUrl);
-                    // Remove fragment
                     if (!string.IsNullOrEmpty(absUri.Fragment))
                     {
                         UriBuilder builder = new UriBuilder(absUri) { Fragment = "" };
@@ -849,7 +998,6 @@
                 }
             }
 
-            // Parse the base URL
             if (string.IsNullOrWhiteSpace(baseUrl))
             {
                 Log("empty base URL provided to NormalizeUrl");
@@ -877,12 +1025,10 @@
             {
                 string result = null;
 
-                // Handle protocol-relative URLs (//example.com/path)
                 if (relativeUrl.StartsWith("//"))
                 {
                     result = baseUri.Scheme + ":" + relativeUrl;
                 }
-                // Handle absolute paths (/path/to/page)
                 else if (relativeUrl.StartsWith("/"))
                 {
                     result = $"{baseUri.Scheme}://{baseUri.Host}";
@@ -892,26 +1038,20 @@
                     }
                     result += relativeUrl;
                 }
-                // Handle query strings only (?param=value)
                 else if (relativeUrl.StartsWith("?"))
                 {
                     result = baseUri.GetLeftPart(UriPartial.Path) + relativeUrl;
                 }
-                // Handle fragments only (#section)
                 else if (relativeUrl.StartsWith("#"))
                 {
-                    // Return base URL without fragment
                     result = baseUri.GetLeftPart(UriPartial.Query);
                 }
-                // Handle relative paths (including ./ and ../)
                 else
                 {
-                    // Use Uri class to resolve relative paths
                     Uri combined = new Uri(baseUri, relativeUrl);
                     result = combined.ToString();
                 }
 
-                // Final validation and fragment removal
                 if (!string.IsNullOrEmpty(result))
                 {
                     try
@@ -923,7 +1063,6 @@
                             return null;
                         }
 
-                        // Remove fragment if present
                         if (!string.IsNullOrEmpty(finalUri.Fragment))
                         {
                             int fragmentIndex = result.IndexOf('#');
@@ -968,16 +1107,13 @@
 
         private bool IsExternalUrl(string baseUrl, string testUrl)
         {
-            // If testUrl is null or empty, it's not external
             if (string.IsNullOrWhiteSpace(testUrl))
                 return false;
 
-            // If it's a relative URL (starts with / or ~/ or ./ or ../), it's not external
             if (testUrl.StartsWith("/") || testUrl.StartsWith("~/") ||
                 testUrl.StartsWith("./") || testUrl.StartsWith("../"))
                 return false;
 
-            // If it's a fragment or query, it's not external
             if (testUrl.StartsWith("#") || testUrl.StartsWith("?"))
                 return false;
 
@@ -988,22 +1124,18 @@
             }
             catch (UriFormatException)
             {
-                // If base URL is invalid, consider test URL external to be safe
                 return true;
             }
 
-            // If it doesn't have a scheme, add one from the base URL
             if (!testUrl.Contains("://") && !testUrl.StartsWith("//"))
             {
                 testUrl = $"{tempBaseUri.Scheme}://{testUrl}";
             }
             else if (testUrl.StartsWith("//"))
             {
-                // Handle protocol-relative URLs
                 testUrl = $"{tempBaseUri.Scheme}:{testUrl}";
             }
 
-            // Try to create URI from the test URL
             Uri testUri;
             try
             {
@@ -1011,11 +1143,9 @@
             }
             catch (UriFormatException)
             {
-                // If test URL is invalid, consider it external to be safe
                 return true;
             }
 
-            // Compare the hosts
             return !string.Equals(testUri.Host, tempBaseUri.Host, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -1031,7 +1161,6 @@
                 }
                 catch (Exception)
                 {
-                    // Skip invalid regex patterns
                     continue;
                 }
             }
@@ -1041,47 +1170,37 @@
 
         private bool IsSameSubdomain(string url1, string url2)
         {
-            // Handle null or empty inputs
             if (string.IsNullOrWhiteSpace(url1) || string.IsNullOrWhiteSpace(url2)) return false;
 
             try
             {
-                // Handle relative URLs for url2
                 Uri url1Uri = new Uri(url1);
                 if (url2.StartsWith("/"))
                 {
-                    // Relative to root, so it's the same domain
                     return true;
                 }
                 else if (url2.StartsWith("./") || url2.StartsWith("../") ||
                         (!url2.Contains("://") && !url2.StartsWith("//")))
                 {
-                    // Relative URL, so it's the same domain
                     return true;
                 }
 
-                // If url2 starts with "//", it's protocol-relative, so prepend the scheme from url1
                 if (url2.StartsWith("//"))
                 {
                     url2 = $"{url1Uri.Scheme}:{url2}";
                 }
 
-                // Parse URL2 into a URI object
                 Uri url2Uri = new Uri(url2);
-
-                // Compare domains (hosts)
                 return string.Equals(url1Uri.Host, url2Uri.Host, StringComparison.OrdinalIgnoreCase);
             }
             catch (UriFormatException)
             {
-                // If URLs are invalid, return false
                 return false;
             }
         }
 
         private bool IsSameRootDomain(string url1, string url2)
         {
-            // Handle null or empty inputs
             if (string.IsNullOrWhiteSpace(url1) || string.IsNullOrWhiteSpace(url2)) return false;
             if (_DomainParser == null) return false;
 
@@ -1093,11 +1212,9 @@
                 else if (url2.StartsWith("./") || url2.StartsWith("../") ||
                         (!url2.Contains("://") && !url2.StartsWith("//")))
                 {
-                    // Relative URL, so it's the same domain
                     return true;
                 }
 
-                // If url2 starts with "//", it's protocol-relative, so prepend the scheme from url1
                 if (url2.StartsWith("//"))
                 {
                     url2 = $"{url1Uri.Scheme}:{url2}";
@@ -1105,13 +1222,11 @@
 
                 Uri url2Uri = new Uri(url2);
 
-                // Parse the domains using Nager.PublicSuffix
                 var domainInfo1 = _DomainParser.Parse(url1Uri.Host);
                 var domainInfo2 = _DomainParser.Parse(url2Uri.Host);
 
                 if (domainInfo1 == null || domainInfo2 == null)
                 {
-                    // Fallback to exact host comparison if parsing fails
                     return string.Equals(url1Uri.Host, url2Uri.Host, StringComparison.OrdinalIgnoreCase);
                 }
 
@@ -1138,14 +1253,11 @@
 
             try
             {
-                // Handle protocol-relative URLs
                 if (baseUrl.StartsWith("//")) baseUrl = "http:" + baseUrl;
 
-                // Parse URL and extract domain
                 Uri uri = new Uri(baseUrl);
                 string domain = uri.Host.ToLowerInvariant();
 
-                // Check for exact match in the allowed domains list
                 return allowedDomains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase));
             }
             catch (UriFormatException)
@@ -1161,10 +1273,9 @@
             if (String.IsNullOrEmpty(baseUrl))
             {
                 Log("checking denied domains and received an empty base URL");
-                return true; // Empty URLs are denied for safety
+                return true;
             }
 
-            // Relative URLs are not denied (they stay within the current domain)
             if (!baseUrl.Contains("://") && !baseUrl.StartsWith("//")) return false;
             if (baseUrl.StartsWith("./")) return false;
 
@@ -1183,7 +1294,6 @@
 
         private bool IsChildUrl(string baseUrl, string testUrl)
         {
-            // Handle null or empty inputs
             if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(testUrl)) return false;
 
             try
@@ -1196,35 +1306,27 @@
                 }
                 else if (testUrl.StartsWith("./") || testUrl.StartsWith("../"))
                 {
-                    // Create an absolute URL from relative URL
                     testUrl = new Uri(baseUriObj, testUrl).ToString();
                 }
                 else if (!testUrl.Contains("://") && !testUrl.StartsWith("//"))
                 {
-                    // Assume it's a relative URL without ./ prefix
                     testUrl = new Uri(baseUriObj, testUrl).ToString();
                 }
 
-                // Ensure both URLs end with trailing slash for proper comparison
                 string normalizedBase = baseUrl.TrimEnd('/') + "/";
                 string normalizedTest = testUrl.TrimEnd('/') + "/";
 
-                // Create URI objects for comparison
                 Uri basePathUri = new Uri(normalizedBase);
                 Uri testUri = new Uri(normalizedTest);
 
-                // Check if domains match
                 if (!string.Equals(basePathUri.Host, testUri.Host, StringComparison.OrdinalIgnoreCase)) return false;
 
-                // Check if test path starts with base path
                 string basePath = basePathUri.AbsolutePath;
                 string testPath = testUri.AbsolutePath;
 
-                // Special case: If base path is root ("/"), any path on same domain is a child
                 if (basePath.Equals("/"))
                     return true;
 
-                // Check if test path starts with base path
                 return testPath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase);
             }
             catch (UriFormatException)
@@ -1343,7 +1445,6 @@
                     QueuedLink link = DequeueQueuedLink();
                     if (link == null)
                     {
-                        // Queue is currently empty, but may receive more items later
                         isQueueEmpty = true;
                         break;
                     }
@@ -1351,7 +1452,7 @@
                     {
                         isQueueEmpty = false;
                     }
-                                          
+
                     try
                     {
                         Uri uri = new Uri(link.Url);
@@ -1402,14 +1503,12 @@
         {
             try
             {
-                // Acquire semaphore before processing
                 await _Semaphore.WaitAsync(token).ConfigureAwait(false);
 
                 try
                 {
                     Log("processing queued link " + link.Url + " parent " + (!String.IsNullOrEmpty(link.ParentUrl) ? link.ParentUrl : ".") + " depth " + link.Depth);
 
-                    // IMPORTANT: Normalize the URL before checking if it's already visited
                     string normalizedUrl = NormalizeUrl(_Settings.Crawl.StartUrl, link.Url);
                     if (string.IsNullOrEmpty(normalizedUrl))
                     {
@@ -1417,10 +1516,8 @@
                         return;
                     }
 
-                    // Update the link URL to use the normalized version
                     link.Url = normalizedUrl;
 
-                    // Now check with the normalized URL
                     Uri uri;
                     try
                     {
@@ -1444,8 +1541,7 @@
                         return;
                     }
 
-                    // Rest of the method continues as before...
-                    if (wr.Data != null)
+                    if (wr.Data != null && IsNavigableContentType(wr.ContentType))
                     {
                         List<string> links = ExtractLinksFromHtml(link.Url, wr.Data);
 
@@ -1459,8 +1555,6 @@
                                     {
                                         string currTrimmed = curr.Trim();
 
-                                        // The extracted links are already normalized from ExtractLinksFromHtml
-                                        // But let's validate they're proper HTTP/HTTPS URLs
                                         if (!currTrimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
                                             !currTrimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                                         {
@@ -1528,8 +1622,6 @@
                                         }
 
                                         Log("adding link " + currTrimmed + " to queue from parent " + link.Url);
-
-                                        // Store the normalized URL in the queue
                                         EnqueueQueuedLink(currTrimmed, link.Url, link.Depth + 1);
                                     }
                                 }
@@ -1559,6 +1651,19 @@
                 Log("error processing link " + link.Url + Environment.NewLine + e.ToString());
                 try { _Semaphore.Release(); } catch { }
                 RemoveProcessingLink(link);
+            }
+        }
+        
+        private string GetDomainRoot(string url)
+        {
+            try
+            {
+                Uri uri = new Uri(url);
+                return $"{uri.Scheme}://{uri.Host}{(uri.IsDefaultPort ? "" : ":" + uri.Port)}";
+            }
+            catch
+            {
+                return url;
             }
         }
 

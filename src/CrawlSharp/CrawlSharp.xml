@@ -182,6 +182,100 @@
             BearerToken.
             </summary>
         </member>
+        <member name="T:CrawlSharp.Web.ContentTypeInfo">
+            <summary>
+            Content type information from HTTP headers.
+            </summary>
+            <remarks>
+            This class encapsulates the results of a content type check performed via HTTP HEAD request.
+            It is used to determine whether content should be navigated to in a browser context
+            or downloaded directly via HTTP client.
+            </remarks>
+        </member>
+        <member name="P:CrawlSharp.Web.ContentTypeInfo.IsNavigable">
+            <summary>
+            Gets or sets a value indicating whether the content is navigable in a browser context.
+            </summary>
+            <value>
+            <c>true</c> if the content type indicates HTML or other browser-renderable content
+            (e.g., text/html, application/xhtml+xml); otherwise, <c>false</c> for downloadable
+            content such as PDFs, images, or other binary files.
+            </value>
+            <remarks>
+            When this value is <c>true</c>, the content can be loaded using browser automation tools
+            like Playwright. When <c>false</c>, the content should be retrieved directly via HTTP client
+            to preserve the binary data.
+            </remarks>
+        </member>
+        <member name="P:CrawlSharp.Web.ContentTypeInfo.MediaType">
+            <summary>
+            Gets or sets the MIME type of the content as reported by the Content-Type header.
+            </summary>
+            <value>
+            The media type string (e.g., "text/html", "application/pdf", "image/jpeg").
+            May be <c>null</c> if the Content-Type header was not present or if the check failed.
+            </value>
+            <remarks>
+            This value is normalized to lowercase and excludes any charset or other parameters
+            that may be present in the Content-Type header.
+            </remarks>
+        </member>
+        <member name="P:CrawlSharp.Web.ContentTypeInfo.ContentLength">
+            <summary>
+            Gets or sets the size of the content in bytes as reported by the Content-Length header.
+            </summary>
+            <value>
+            The content length in bytes, or <c>null</c> if the Content-Length header was not present
+            or if the check failed.
+            </value>
+            <remarks>
+            This can be useful for determining whether to download large files or for providing
+            progress information during downloads. Note that some servers may not provide
+            accurate Content-Length headers, especially for dynamically generated content.
+            </remarks>
+        </member>
+        <member name="P:CrawlSharp.Web.ContentTypeInfo.CheckSucceeded">
+            <summary>
+            Gets or sets a value indicating whether the content type check completed successfully.
+            </summary>
+            <value>
+            <c>true</c> if the HEAD request succeeded and headers were retrieved; otherwise, <c>false</c>
+            if the request failed due to network issues, authentication problems, or server errors.
+            </value>
+            <remarks>
+            When this value is <c>false</c>, the <see cref="P:CrawlSharp.Web.ContentTypeInfo.IsNavigable"/> property defaults to <c>true</c>
+            as a safe fallback, allowing the crawler to attempt browser navigation. The crawler can then
+            handle any download triggers that may occur during navigation.
+            </remarks>
+        </member>
+        <member name="M:CrawlSharp.Web.ContentTypeInfo.#ctor">
+            <summary>
+            Initializes a new instance of the <see cref="T:CrawlSharp.Web.ContentTypeInfo"/> class.
+            </summary>
+            <remarks>
+            Creates a new ContentTypeInfo with default values. By default, <see cref="P:CrawlSharp.Web.ContentTypeInfo.IsNavigable"/>
+            is set to <c>false</c>, <see cref="P:CrawlSharp.Web.ContentTypeInfo.CheckSucceeded"/> is set to <c>false</c>,
+            and both <see cref="P:CrawlSharp.Web.ContentTypeInfo.MediaType"/> and <see cref="P:CrawlSharp.Web.ContentTypeInfo.ContentLength"/> are <c>null</c>.
+            </remarks>
+        </member>
+        <member name="M:CrawlSharp.Web.ContentTypeInfo.#ctor(System.Boolean,System.String,System.Nullable{System.Int64},System.Boolean)">
+            <summary>
+            Initializes a new instance of the <see cref="T:CrawlSharp.Web.ContentTypeInfo"/> class with specified values.
+            </summary>
+            <param name="isNavigable">Whether the content is navigable in a browser.</param>
+            <param name="mediaType">The MIME type of the content.</param>
+            <param name="contentLength">The size of the content in bytes.</param>
+            <param name="checkSucceeded">Whether the content type check succeeded.</param>
+        </member>
+        <member name="M:CrawlSharp.Web.ContentTypeInfo.ToString">
+            <summary>
+            Returns a string representation of the <see cref="T:CrawlSharp.Web.ContentTypeInfo"/> instance.
+            </summary>
+            <returns>
+            A string containing the media type, navigability status, content length (if available),
+            and check success status.
+            </returns>
+        </member>
         <member name="T:CrawlSharp.Web.CrawlSettings">
             <summary>
             Crawl settings.
@@ -721,7 +815,7 @@
         </member>
         <member name="P:CrawlSharp.Web.WebResource.ContentType">
             <summary>
-            Content-type.
+            The Content-Type header value of the resource.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.WebResource.ETag">

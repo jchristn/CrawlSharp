@@ -96,21 +96,9 @@
         }
 
         /// <summary>
-        /// Content-type.
+        /// The Content-Type header value of the resource.
         /// </summary>
-        public string ContentType
-        {
-            get
-            {
-                if (_Headers != null)
-                {
-                    string typeKey = _Headers.AllKeys.FirstOrDefault(k => string.Equals(k, "Content-Type", StringComparison.OrdinalIgnoreCase));
-                    string contentType = typeKey != null ? _Headers[typeKey] : null;
-                }
-
-                return null;
-            }
-        }
+        public string ContentType { get; set; }
 
         /// <summary>
         /// Value from the ETag header.
