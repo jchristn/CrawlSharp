@@ -14,8 +14,6 @@
     using CrawlSharp.Helpers;
     using HtmlAgilityPack;
     using Microsoft.Playwright;
-    using Nager.PublicSuffix;
-    using Nager.PublicSuffix.RuleProviders;
     using RestWrapper;
     using SerializationHelper;
 
@@ -129,8 +127,6 @@
         private IPlaywright _IPlaywright = null;
         private IBrowser _IBrowser = null;
 
-        private static IDomainParser _DomainParser = null;
-
         private CancellationToken _Token;
         private Task _QueueProcessor = null;
 
@@ -148,13 +144,6 @@
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Semaphore = new SemaphoreSlim(_Settings.Crawl.MaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
             _Token = token;
-
-            if (_Settings.Crawl.RestrictToSameRootDomain)
-            {
-                LocalFileRuleProvider ruleProvider = new LocalFileRuleProvider("public_suffix_list.dat");
-                ruleProvider.BuildAsync().Wait();
-                _DomainParser = new DomainParser(ruleProvider);
-            }
 
             if (_Settings.Crawl.UseHeadlessBrowser)
             {
@@ -749,7 +738,7 @@
 
                     if (contentInfo.CheckSucceeded)
                     {
-                        Log($"Content type check for {normalizedUri}: MediaType={contentInfo.MediaType}, IsNavigable={contentInfo.IsNavigable}");
+                        Log($"content type check for {normalizedUri}: {contentInfo.MediaType} navigable {contentInfo.IsNavigable}");
                     }
                 }
 
@@ -1202,19 +1191,19 @@
         private bool IsSameRootDomain(string url1, string url2)
         {
             if (string.IsNullOrWhiteSpace(url1) || string.IsNullOrWhiteSpace(url2)) return false;
-            if (_DomainParser == null) return false;
-
             try
             {
                 Uri url1Uri = new Uri(url1);
-                if (url2.StartsWith("/")) return true;
 
+                // Handle relative URLs - they're always in the same root domain
+                if (url2.StartsWith("/")) return true;
                 else if (url2.StartsWith("./") || url2.StartsWith("../") ||
                         (!url2.Contains("://") && !url2.StartsWith("//")))
                 {
                     return true;
                 }
 
+                // Handle protocol-relative URLs
                 if (url2.StartsWith("//"))
                 {
                     url2 = $"{url1Uri.Scheme}:{url2}";
@@ -1222,15 +1211,26 @@
 
                 Uri url2Uri = new Uri(url2);
 
-                var domainInfo1 = _DomainParser.Parse(url1Uri.Host);
-                var domainInfo2 = _DomainParser.Parse(url2Uri.Host);
+                string host1 = url1Uri.Host.ToLowerInvariant();
+                string host2 = url2Uri.Host.ToLowerInvariant();
 
-                if (domainInfo1 == null || domainInfo2 == null)
-                {
-                    return string.Equals(url1Uri.Host, url2Uri.Host, StringComparison.OrdinalIgnoreCase);
-                }
+                // Check if they're the same host
+                if (host1 == host2)
+                    return true;
 
-                return string.Equals(domainInfo1.RegistrableDomain, domainInfo2.RegistrableDomain, StringComparison.OrdinalIgnoreCase);
+                // Check if one is a subdomain of the other
+                // url2 is under url1's domain
+                if (host2.EndsWith("." + host1, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                // url1 is under url2's domain  
+                if (host1.EndsWith("." + host2, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                // Without a public suffix list, we can't reliably determine if two different
+                // domains share the same root domain (e.g., sub1.example.com and sub2.example.com)
+                // This is the limitation of not using the library
+                return false;
             }
             catch (UriFormatException)
             {
