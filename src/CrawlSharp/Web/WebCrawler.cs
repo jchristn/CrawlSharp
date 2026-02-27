@@ -147,10 +147,7 @@
 
             if (_Settings.Crawl.UseHeadlessBrowser)
             {
-                int exitCode = Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
-                if (exitCode != 0) throw new InvalidOperationException("Unable to install Chromium");
-
-                exitCode = Microsoft.Playwright.Program.Main(new[] { "install", "firefox" });
+                int exitCode = Microsoft.Playwright.Program.Main(new[] { "install", "firefox" });
                 if (exitCode != 0) throw new InvalidOperationException("Unable to install Firefox");
 
                 _IPlaywright = Playwright.CreateAsync().GetAwaiter().GetResult();

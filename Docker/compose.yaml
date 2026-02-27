@@ -2,13 +2,13 @@ services:
 
   #
   # CrawlSharp
-  # See https://hub.docker.com/r/jchristn/crawlsharp
+  # See https://hub.docker.com/r/jchristn77/crawlsharp
   # and https://github.com/jchristn/crawlsharp
   #
 
   crawlsharp:
     container_name: 'crawlsharp'
-    image: 'jchristn/crawlsharp:v1.0.0'
+    image: 'jchristn77/crawlsharp:v1.0.0'
     network_mode: 'host'
     stdin_open: true
     tty: true

@@ -94,7 +94,7 @@ Refer to `REST_API.md` for more information about using the RESTful API.
 
 ## Running in Docker
 
-A Docker image is available in [Docker Hub](https://hub.docker.com/r/jchristn/crawlsharp) under `jchristn/crawlsharp`.  Use the Docker Compose start (`compose-up.sh` and `compose-up.bat`) and stop (`compose-down.sh` and `compose-down.bat`) scripts in the `Docker` directory if you wish to run within Docker Compose. 
+A Docker image is available in [Docker Hub](https://hub.docker.com/r/jchristn77/crawlsharp) under `jchristn77/crawlsharp`.  Use the Docker Compose start (`compose-up.sh` and `compose-up.bat`) and stop (`compose-down.sh` and `compose-down.bat`) scripts in the `Docker` directory if you wish to run within Docker Compose. 
 
 ## Using Headless Browser
 
