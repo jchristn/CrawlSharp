@@ -1,5 +1,5 @@
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Copy solution file and all project files
@@ -22,11 +22,12 @@ RUN find . -type d -name obj -exec rm -rf {} + || true
 # Build and publish
 RUN dotnet publish CrawlSharp.Server/CrawlSharp.Server.csproj \
     -c Release \
+    -f net10.0 \
     -o /app/publish \
     -p:GeneratePackageOnBuild=false
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # Install dependencies for Playwright
 RUN apt-get update && apt-get install -y \
