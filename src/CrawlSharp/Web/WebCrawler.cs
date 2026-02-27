@@ -511,7 +511,7 @@
                                         ParentUrl = parentUrl,
                                         Depth = depth,
                                         Status = resp.StatusCode,
-                                        ContentType = GetContentTypeFromHeaders(resp.Headers),
+                                        ContentType = resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
                                         Headers = resp.Headers,
                                         Data = resp.DataAsBytes
                                     };
@@ -561,7 +561,7 @@
                         ParentUrl = parentUrl,
                         Depth = depth,
                         Status = resp.StatusCode,
-                        ContentType = contentType ?? GetContentTypeFromHeaders(resp.Headers),
+                        ContentType = contentType ?? resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
                         ETag = GetEtag(resp),
                         MD5Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.MD5Hash(resp.DataAsBytes)) : null,
                         SHA1Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA1Hash(resp.DataAsBytes)) : null,
