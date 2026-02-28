@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-		<Version>1.0.17</Version>
+		<Version>1.0.18</Version>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<DocumentationFile>CrawlSharp.xml</DocumentationFile>
@@ -10,7 +10,7 @@
 		<Title>CrawlSharp is a library useful for crawling web endpoints to identify structure and retrieve contents.</Title>
 		<Authors>Joel Christner</Authors>
 		<Description>CrawlSharp is a library useful for crawling web endpoints to identify structure and retrieve contents.</Description>
-		<Copyright>(c)2025 Joel Christner</Copyright>
+		<Copyright>(c)2026 Joel Christner</Copyright>
 		<PackageProjectUrl>https://github.com/jchristn/CrawlSharp</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -43,9 +43,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="HtmlAgilityPack" Version="1.12.1" />
-	  <PackageReference Include="Microsoft.Playwright" Version="1.53.0" />
-	  <PackageReference Include="RestWrapper" Version="3.1.5" />
+	  <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+	  <PackageReference Include="Microsoft.Playwright" Version="1.58.0" />
+	  <PackageReference Include="RestWrapper" Version="3.1.8" />
 	  <PackageReference Include="SerializationHelper" Version="2.0.3" />
 	</ItemGroup>
 

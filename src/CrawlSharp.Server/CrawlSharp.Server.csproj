@@ -7,8 +7,8 @@
 
 	<ItemGroup>
 		<PackageReference Include="SerializationHelper" Version="2.0.3" />
-		<PackageReference Include="SyslogLogging" Version="2.0.8" />
-		<PackageReference Include="Watson" Version="6.3.5" />
+		<PackageReference Include="SyslogLogging" Version="2.0.13" />
+		<PackageReference Include="Watson" Version="6.5.5" />
 	</ItemGroup>
 
 	<ItemGroup>

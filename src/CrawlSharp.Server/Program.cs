@@ -231,10 +231,17 @@
 
                 await foreach (WebResource resource in crawler.CrawlAsync())
                 {
-                    await ctx.Response.SendEvent(_Serializer.SerializeJson(resource, false), false);
+                    await ctx.Response.SendEvent(new ServerSentEvent
+                    {
+                        Data = _Serializer.SerializeJson(resource, false)
+                    },
+                    false);
                 }
 
-                await ctx.Response.SendEvent("[end]", true);
+                await ctx.Response.SendEvent(new ServerSentEvent
+                {
+                    Data = "[DONE]"
+                }, true);
 
                 ts.End = DateTime.UtcNow;
 

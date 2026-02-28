@@ -505,6 +505,8 @@
                                     Exception?.Invoke(redirectNormalizedUrl, ufe);
                                     Log("invalid redirect URI format: " + redirectNormalizedUrl);
 
+                                    byte[] redirectData = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
+
                                     WebResource invalidRedirectResource = new WebResource
                                     {
                                         Url = normalizedUri.ToString(),
@@ -513,7 +515,7 @@
                                         Status = resp.StatusCode,
                                         ContentType = resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
                                         Headers = resp.Headers,
-                                        Data = resp.DataAsBytes
+                                        Data = redirectData
                                     };
 
                                     AddAlreadyVisited(normalizedUri, invalidRedirectResource);
@@ -555,6 +557,8 @@
                         Log("status " + resp.StatusCode + " for URL " + normalizedUri);
                     }
 
+                    byte[] data = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
+
                     WebResource resource = new WebResource
                     {
                         Url = normalizedUri.ToString(),
@@ -563,11 +567,11 @@
                         Status = resp.StatusCode,
                         ContentType = contentType ?? resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
                         ETag = GetEtag(resp),
-                        MD5Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.MD5Hash(resp.DataAsBytes)) : null,
-                        SHA1Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA1Hash(resp.DataAsBytes)) : null,
-                        SHA256Hash = resp.DataAsBytes != null ? Convert.ToHexString(HashHelper.SHA256Hash(resp.DataAsBytes)) : null,
+                        MD5Hash = data != null ? Convert.ToHexString(HashHelper.MD5Hash(data)) : null,
+                        SHA1Hash = data != null ? Convert.ToHexString(HashHelper.SHA1Hash(data)) : null,
+                        SHA256Hash = data != null ? Convert.ToHexString(HashHelper.SHA256Hash(data)) : null,
                         Headers = resp.Headers,
-                        Data = resp.DataAsBytes
+                        Data = data
                     };
 
                     AddAlreadyVisited(normalizedUri, resource);
@@ -611,20 +615,20 @@
                 catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
                 {
                     // Download was triggered, fall back to REST client
-                    Log("Download triggered for " + normalizedUri + ", using REST client");
+                    Log("download triggered for " + normalizedUri + ", using REST client");
                     return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
                 }
 
                 // Check if download was initiated during navigation
                 if (downloadInitiated)
                 {
-                    Log("Download initiated for " + normalizedUri + ", using REST client");
+                    Log("download initiated for " + normalizedUri + ", using REST client");
                     return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
                 }
 
                 if (response == null)
                 {
-                    Log("No response received for " + normalizedUri);
+                    Log("no response received for " + normalizedUri);
                     return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
                 }
 
@@ -1073,6 +1077,30 @@
                 Log($"error normalizing URL '{relativeUrl}' with base URL '{baseUrl}': {e.Message}");
                 return null;
             }
+        }
+
+        private async Task<byte[]> ReadResponseBytesAsync(RestResponse resp, CancellationToken token = default)
+        {
+            if (resp == null) return null;
+
+            if (resp.ChunkedTransferEncoding)
+            {
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    ChunkData chunk;
+                    while ((chunk = await resp.ReadChunkAsync(token).ConfigureAwait(false)) != null)
+                    {
+                        if (chunk.Data != null && chunk.Data.Length > 0)
+                            ms.Write(chunk.Data, 0, chunk.Data.Length);
+
+                        if (chunk.IsFinal) break;
+                    }
+
+                    return ms.Length > 0 ? ms.ToArray() : null;
+                }
+            }
+
+            return resp.DataAsBytes;
         }
 
         private string GetEtag(RestResponse resp)
