@@ -33,9 +33,17 @@ Content-Type: application/json
     "AllowedDomains": [],
     "DeniedDomains": [],
     "MaxCrawlDepth": 2,
-    "MaxParallelTasks": 16,
     "ExcludeLinkPatterns": [],
-    "FollowExternalLinks": true
+    "FollowExternalLinks": true,
+    "MaxParallelTasks": 16,
+    "PageTimeoutMs": 30000,
+    "ThrottleMs": 5000,
+    "RetryOn429": true,
+    "MaxRetries": 3,
+    "RetryMinBackoffMs": 1000,
+    "RetryMaxBackoffMs": 30000,
+    "RetryBackoffJitter": true,
+    "RequestDelayMs": 2500
   }
 }
 

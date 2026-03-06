@@ -127,6 +127,8 @@
         private IPlaywright _IPlaywright = null;
         private IBrowser _IBrowser = null;
 
+        private readonly Random _RetryJitter = new Random();
+
         private CancellationToken _Token;
         private Task _QueueProcessor = null;
 
@@ -144,6 +146,7 @@
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Semaphore = new SemaphoreSlim(_Settings.Crawl.MaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
             _Token = token;
+            _DelayMilliseconds = _Settings.Crawl.RequestDelayMs;
 
             if (_Settings.Crawl.UseHeadlessBrowser)
             {
@@ -342,6 +345,19 @@
 
         #region Private-Methods
 
+        private async Task DelayForRetry(Uri uri, int attempt, CancellationToken token)
+        {
+            int delay = (int)Math.Min(
+                _Settings.Crawl.RetryMinBackoffMs * Math.Pow(2, attempt),
+                _Settings.Crawl.RetryMaxBackoffMs);
+
+            if (_Settings.Crawl.RetryBackoffJitter)
+                delay = _RetryJitter.Next(0, delay + 1);
+
+            Log("429 retry attempt " + (attempt + 1) + "/" + _Settings.Crawl.MaxRetries + " for " + uri + ", backing off " + delay + "ms");
+            await Task.Delay(delay, token).ConfigureAwait(false);
+        }
+
         private void Log(string msg)
         {
             if (String.IsNullOrEmpty(msg)) return;
@@ -451,231 +467,260 @@
 
         private async Task<WebResource> RetrieveWithRestClient(Uri normalizedUri, string parentUrl, int depth, string contentType, CancellationToken token)
         {
-            using (RestRequest req = RequestBuilder(normalizedUri.ToString()))
-            {
-                using (RestResponse resp = await req.SendAsync(token).ConfigureAwait(false))
-                {
-                    if (resp == null)
-                    {
-                        Log("unable to retrieve " + normalizedUri);
+            int attempt = 0;
 
-                        WebResource failedResource = new WebResource
+            while (true)
+            {
+                using (RestRequest req = RequestBuilder(normalizedUri.ToString()))
+                {
+                    using (RestResponse resp = await req.SendAsync(token).ConfigureAwait(false))
+                    {
+                        if (resp == null)
+                        {
+                            Log("unable to retrieve " + normalizedUri);
+
+                            WebResource failedResource = new WebResource
+                            {
+                                Url = normalizedUri.ToString(),
+                                ParentUrl = parentUrl,
+                                Depth = depth,
+                                Status = 0,
+                                ContentType = contentType
+                            };
+
+                            AddAlreadyVisited(normalizedUri, failedResource);
+                            return failedResource;
+                        }
+
+                        if (resp.StatusCode >= 300 && resp.StatusCode <= 308)
+                        {
+                            Log("redirect status " + resp.StatusCode + " for URL " + normalizedUri);
+
+                            if (_Settings.Crawl.FollowRedirects)
+                            {
+                                string redirectLocation = resp.Headers.AllKeys
+                                    .FirstOrDefault(k => string.Equals(k, "Location", StringComparison.OrdinalIgnoreCase))
+                                    is string key ? resp.Headers[key] : null;
+
+                                if (String.IsNullOrEmpty(redirectLocation))
+                                {
+                                    Log("unable to retrieve redirect location from response for URL " + normalizedUri);
+                                }
+                                else
+                                {
+                                    string redirectNormalizedUrl = NormalizeUrl(normalizedUri.ToString(), redirectLocation);
+
+                                    Uri redirectUri;
+                                    try
+                                    {
+                                        redirectUri = new Uri(redirectNormalizedUrl);
+                                        if (!String.IsNullOrEmpty(redirectUri.Fragment))
+                                        {
+                                            UriBuilder builder = new UriBuilder(redirectUri);
+                                            builder.Fragment = "";
+                                            redirectUri = builder.Uri;
+                                        }
+                                    }
+                                    catch (UriFormatException ufe)
+                                    {
+                                        Exception?.Invoke(redirectNormalizedUrl, ufe);
+                                        Log("invalid redirect URI format: " + redirectNormalizedUrl);
+
+                                        byte[] redirectData = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
+
+                                        WebResource invalidRedirectResource = new WebResource
+                                        {
+                                            Url = normalizedUri.ToString(),
+                                            ParentUrl = parentUrl,
+                                            Depth = depth,
+                                            Status = resp.StatusCode,
+                                            ContentType = resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
+                                            Headers = resp.Headers,
+                                            Data = redirectData
+                                        };
+
+                                        AddAlreadyVisited(normalizedUri, invalidRedirectResource);
+                                        return invalidRedirectResource;
+                                    }
+
+                                    if (IsAlreadyVisited(redirectUri))
+                                    {
+                                        Log("redirect to already visited URL " + redirectUri + " from " + normalizedUri);
+                                        WebResource alreadyVisited = GetAlreadyVisited(redirectUri);
+                                        AddAlreadyVisited(normalizedUri, alreadyVisited);
+                                        return alreadyVisited;
+                                    }
+
+                                    Log("following redirect for URL " + normalizedUri + " to " + redirectUri);
+                                    WebResource redirectedResource = await RetrieveWebResource(redirectUri.ToString(), parentUrl, depth, token).ConfigureAwait(false);
+
+                                    if (redirectedResource != null)
+                                    {
+                                        AddAlreadyVisited(normalizedUri, redirectedResource);
+                                    }
+
+                                    return redirectedResource;
+                                }
+                            }
+                            else
+                            {
+                                Log("ignoring redirect response from URL " + normalizedUri);
+                            }
+                        }
+                        else if (resp.StatusCode == 429)
+                        {
+                            Log("throttle status 429 for " + normalizedUri);
+
+                            if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries)
+                            {
+                                await DelayForRetry(normalizedUri, attempt, token).ConfigureAwait(false);
+                                attempt++;
+                                continue;
+                            }
+
+                            if (_Settings.Crawl.ThrottleMs > 0)
+                                await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            Log("status " + resp.StatusCode + " for URL " + normalizedUri);
+                        }
+
+                        byte[] data = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
+
+                        WebResource resource = new WebResource
                         {
                             Url = normalizedUri.ToString(),
                             ParentUrl = parentUrl,
                             Depth = depth,
-                            Status = 0,
-                            ContentType = contentType
+                            Status = resp.StatusCode,
+                            ContentType = contentType ?? resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
+                            ETag = GetEtag(resp),
+                            MD5Hash = data != null ? Convert.ToHexString(HashHelper.MD5Hash(data)) : null,
+                            SHA1Hash = data != null ? Convert.ToHexString(HashHelper.SHA1Hash(data)) : null,
+                            SHA256Hash = data != null ? Convert.ToHexString(HashHelper.SHA256Hash(data)) : null,
+                            Headers = resp.Headers,
+                            Data = data
                         };
 
-                        AddAlreadyVisited(normalizedUri, failedResource);
-                        return failedResource;
+                        AddAlreadyVisited(normalizedUri, resource);
+                        return resource;
                     }
-
-                    if (resp.StatusCode >= 300 && resp.StatusCode <= 308)
-                    {
-                        Log("redirect status " + resp.StatusCode + " for URL " + normalizedUri);
-
-                        if (_Settings.Crawl.FollowRedirects)
-                        {
-                            string redirectLocation = resp.Headers.AllKeys
-                                .FirstOrDefault(k => string.Equals(k, "Location", StringComparison.OrdinalIgnoreCase))
-                                is string key ? resp.Headers[key] : null;
-
-                            if (String.IsNullOrEmpty(redirectLocation))
-                            {
-                                Log("unable to retrieve redirect location from response for URL " + normalizedUri);
-                            }
-                            else
-                            {
-                                string redirectNormalizedUrl = NormalizeUrl(normalizedUri.ToString(), redirectLocation);
-
-                                Uri redirectUri;
-                                try
-                                {
-                                    redirectUri = new Uri(redirectNormalizedUrl);
-                                    if (!String.IsNullOrEmpty(redirectUri.Fragment))
-                                    {
-                                        UriBuilder builder = new UriBuilder(redirectUri);
-                                        builder.Fragment = "";
-                                        redirectUri = builder.Uri;
-                                    }
-                                }
-                                catch (UriFormatException ufe)
-                                {
-                                    Exception?.Invoke(redirectNormalizedUrl, ufe);
-                                    Log("invalid redirect URI format: " + redirectNormalizedUrl);
-
-                                    byte[] redirectData = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
-
-                                    WebResource invalidRedirectResource = new WebResource
-                                    {
-                                        Url = normalizedUri.ToString(),
-                                        ParentUrl = parentUrl,
-                                        Depth = depth,
-                                        Status = resp.StatusCode,
-                                        ContentType = resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
-                                        Headers = resp.Headers,
-                                        Data = redirectData
-                                    };
-
-                                    AddAlreadyVisited(normalizedUri, invalidRedirectResource);
-                                    return invalidRedirectResource;
-                                }
-
-                                if (IsAlreadyVisited(redirectUri))
-                                {
-                                    Log("redirect to already visited URL " + redirectUri + " from " + normalizedUri);
-                                    WebResource alreadyVisited = GetAlreadyVisited(redirectUri);
-                                    AddAlreadyVisited(normalizedUri, alreadyVisited);
-                                    return alreadyVisited;
-                                }
-
-                                Log("following redirect for URL " + normalizedUri + " to " + redirectUri);
-                                WebResource redirectedResource = await RetrieveWebResource(redirectUri.ToString(), parentUrl, depth, token).ConfigureAwait(false);
-
-                                if (redirectedResource != null)
-                                {
-                                    AddAlreadyVisited(normalizedUri, redirectedResource);
-                                }
-
-                                return redirectedResource;
-                            }
-                        }
-                        else
-                        {
-                            Log("ignoring redirect response from URL " + normalizedUri);
-                        }
-                    }
-                    else if (resp.StatusCode == 429)
-                    {
-                        Log("throttle status " + resp.StatusCode + " for " + normalizedUri);
-                        if (_Settings.Crawl.ThrottleMs > 0)
-                            await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        Log("status " + resp.StatusCode + " for URL " + normalizedUri);
-                    }
-
-                    byte[] data = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
-
-                    WebResource resource = new WebResource
-                    {
-                        Url = normalizedUri.ToString(),
-                        ParentUrl = parentUrl,
-                        Depth = depth,
-                        Status = resp.StatusCode,
-                        ContentType = contentType ?? resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
-                        ETag = GetEtag(resp),
-                        MD5Hash = data != null ? Convert.ToHexString(HashHelper.MD5Hash(data)) : null,
-                        SHA1Hash = data != null ? Convert.ToHexString(HashHelper.SHA1Hash(data)) : null,
-                        SHA256Hash = data != null ? Convert.ToHexString(HashHelper.SHA256Hash(data)) : null,
-                        Headers = resp.Headers,
-                        Data = data
-                    };
-
-                    AddAlreadyVisited(normalizedUri, resource);
-                    return resource;
                 }
             }
         }
 
         private async Task<WebResource> RetrieveWithPlaywright(Uri normalizedUri, string parentUrl, int depth, string contentType, CancellationToken token)
         {
-            await using var context = await _IBrowser.NewContextAsync(new BrowserNewContextOptions
-            {
-                UserAgent = _Settings.Crawl.UserAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
-                Locale = "en-US",
-                TimezoneId = "America/New_York",
-                AcceptDownloads = false
-            });
+            int attempt = 0;
 
-            var page = await context.NewPageAsync();
-
-            // Track if a download was initiated
-            bool downloadInitiated = false;
-            page.Download += (sender, e) =>
+            while (true)
             {
-                downloadInitiated = true;
-            };
+                await using var context = await _IBrowser.NewContextAsync(new BrowserNewContextOptions
+                {
+                    UserAgent = _Settings.Crawl.UserAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
+                    Locale = "en-US",
+                    TimezoneId = "America/New_York",
+                    AcceptDownloads = false
+                });
 
-            try
-            {
-                IResponse response = null;
+                var page = await context.NewPageAsync();
+
+                // Track if a download was initiated
+                bool downloadInitiated = false;
+                page.Download += (sender, e) =>
+                {
+                    downloadInitiated = true;
+                };
 
                 try
                 {
-                    response = await page.GotoAsync(normalizedUri.ToString(), new PageGotoOptions
+                    IResponse response = null;
+
+                    try
                     {
-                        WaitUntil = WaitUntilState.Load,
-                        Timeout = _Settings.Crawl.PageTimeoutMs
-                    });
-                }
-                catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
-                {
-                    // Download was triggered, fall back to REST client
-                    Log("download triggered for " + normalizedUri + ", using REST client");
-                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
-                }
+                        response = await page.GotoAsync(normalizedUri.ToString(), new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.Load,
+                            Timeout = _Settings.Crawl.PageTimeoutMs
+                        });
+                    }
+                    catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
+                    {
+                        // Download was triggered, fall back to REST client
+                        Log("download triggered for " + normalizedUri + ", using REST client");
+                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                    }
 
-                // Check if download was initiated during navigation
-                if (downloadInitiated)
-                {
-                    Log("download initiated for " + normalizedUri + ", using REST client");
-                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                    // Check if download was initiated during navigation
+                    if (downloadInitiated)
+                    {
+                        Log("download initiated for " + normalizedUri + ", using REST client");
+                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                    }
+
+                    if (response == null)
+                    {
+                        Log("no response received for " + normalizedUri);
+                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                    }
+
+                    if (response.Status == 429)
+                    {
+                        Log("throttle status 429 for " + normalizedUri);
+
+                        if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries)
+                        {
+                            if (page != null && !page.IsClosed)
+                                await page.CloseAsync();
+
+                            await DelayForRetry(normalizedUri, attempt, token).ConfigureAwait(false);
+                            attempt++;
+                            continue;
+                        }
+
+                        if (_Settings.Crawl.ThrottleMs > 0)
+                            await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        Log("status " + response.Status + " for URL " + normalizedUri);
+                    }
+
+                    string content = await page.ContentAsync();
+                    var headers = await response.AllHeadersAsync();
+
+                    NameValueCollection headerCollection = new NameValueCollection();
+                    foreach (var header in headers)
+                    {
+                        headerCollection.Add(header.Key, header.Value);
+                    }
+
+                    WebResource resource = new WebResource
+                    {
+                        Url = normalizedUri.ToString(),
+                        ParentUrl = parentUrl,
+                        Depth = depth,
+                        Status = response.Status,
+                        ContentType = contentType ?? GetContentTypeFromHeaders(headerCollection),
+                        ETag = headers.ContainsKey("etag") ? headers["etag"] : null,
+                        MD5Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.MD5Hash(content)) : null,
+                        SHA1Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA1Hash(content)) : null,
+                        SHA256Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA256Hash(content)) : null,
+                        Headers = headerCollection,
+                        Data = !String.IsNullOrEmpty(content) ? Encoding.UTF8.GetBytes(content) : Array.Empty<byte>()
+                    };
+
+                    AddAlreadyVisited(normalizedUri, resource);
+                    return resource;
                 }
-
-                if (response == null)
+                finally
                 {
-                    Log("no response received for " + normalizedUri);
-                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
-                }
-
-                if (response.Status == 429)
-                {
-                    Log("throttle status " + response.Status + " for " + normalizedUri);
-                    if (_Settings.Crawl.ThrottleMs > 0)
-                        await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
-                }
-                else
-                {
-                    Log("status " + response.Status + " for URL " + normalizedUri);
-                }
-
-                string content = await page.ContentAsync();
-                var headers = await response.AllHeadersAsync();
-
-                NameValueCollection headerCollection = new NameValueCollection();
-                foreach (var header in headers)
-                {
-                    headerCollection.Add(header.Key, header.Value);
-                }
-
-                WebResource resource = new WebResource
-                {
-                    Url = normalizedUri.ToString(),
-                    ParentUrl = parentUrl,
-                    Depth = depth,
-                    Status = response.Status,
-                    ContentType = contentType ?? GetContentTypeFromHeaders(headerCollection),
-                    ETag = headers.ContainsKey("etag") ? headers["etag"] : null,
-                    MD5Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.MD5Hash(content)) : null,
-                    SHA1Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA1Hash(content)) : null,
-                    SHA256Hash = !String.IsNullOrEmpty(content) ? Convert.ToHexString(HashHelper.SHA256Hash(content)) : null,
-                    Headers = headerCollection,
-                    Data = !String.IsNullOrEmpty(content) ? Encoding.UTF8.GetBytes(content) : Array.Empty<byte>()
-                };
-
-                AddAlreadyVisited(normalizedUri, resource);
-                return resource;
-            }
-            finally
-            {
-                if (page != null && !page.IsClosed)
-                {
-                    await page.CloseAsync();
+                    if (page != null && !page.IsClosed)
+                    {
+                        await page.CloseAsync();
+                    }
                 }
             }
         }

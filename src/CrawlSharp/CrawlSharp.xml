@@ -380,6 +380,42 @@
             The number of milliseconds to delay when receiving a 429 response.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RetryOn429">
+            <summary>
+            Boolean indicating whether or not to retry requests that receive a 429 (Too Many Requests) response.
+            Default is true.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.MaxRetries">
+            <summary>
+            Maximum number of retry attempts when receiving a 429 response.
+            Default is 3.  Minimum value is 1.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RetryMinBackoffMs">
+            <summary>
+            Minimum backoff time in milliseconds when retrying after a 429 response.
+            Default is 1000 (1 second).  Minimum value is 100.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RetryMaxBackoffMs">
+            <summary>
+            Maximum backoff time in milliseconds when retrying after a 429 response.
+            Default is 30000 (30 seconds).  Minimum value is 1000.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RetryBackoffJitter">
+            <summary>
+            Boolean indicating whether or not to add random jitter to the backoff delay when retrying after a 429 response.
+            Default is true.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.RequestDelayMs">
+            <summary>
+            The number of milliseconds to delay between each HTTP request.
+            Default is 2500.
+            </summary>
+        </member>
         <member name="M:CrawlSharp.Web.CrawlSettings.#ctor">
             <summary>
             Authentication settings.

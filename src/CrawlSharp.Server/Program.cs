@@ -33,10 +33,20 @@
             Welcome();
             ParseArguments(args);
 
-            _Logging = new LoggingModule("127.0.0.1", 514, true);
+            _Logging = new LoggingModule(
+                new List<SyslogLogging.SyslogServer>
+                {
+                    new SyslogLogging.SyslogServer("127.0.0.1", 514)
+                });
+            _Logging.Settings.MinimumSeverity = (Severity)0;
+            _Logging.Settings.EnableConsole = true;
             _Logging.Settings.EnableColors = false;
+
+            if (!Directory.Exists("logs/"))
+                Directory.CreateDirectory("logs/");
+
             _Logging.Settings.FileLogging = FileLoggingMode.FileWithDate;
-            _Logging.Settings.LogFilename = "crawlsharp.log";
+            _Logging.Settings.LogFilename = "logs/" + "crawlsharp.log";
 
             _Webserver = new Webserver(new WebserverSettings
             {
@@ -55,6 +65,8 @@
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.HEAD, "/favicon.png", FaviconPngRoute, ExceptionRoute);
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.GET, "/favicon.png", FaviconPngRoute, ExceptionRoute);
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.POST, "/crawl", CrawlRoute, ExceptionRoute);
+            _Webserver.Routes.Preflight = PreflightRoute;
+            _Webserver.Routes.PreRouting = PreRoutingRoute;
             _Webserver.Routes.PostRouting = PostRoutingRoute;
 
             if (_Hostname.Equals("*")
@@ -247,6 +259,20 @@
 
                 _Logging.Debug(_Header + "completed crawl request from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl + " (" + ts.TotalMs + "ms)");
             }
+        }
+
+        private static async Task PreflightRoute(HttpContextBase ctx)
+        {
+            ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
+            ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, HEAD, OPTIONS";
+            ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+            ctx.Response.StatusCode = 200;
+            await ctx.Response.Send();
+        }
+
+        private static async Task PreRoutingRoute(HttpContextBase ctx)
+        {
+            ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
         }
 
         private static async Task PostRoutingRoute(HttpContextBase ctx)

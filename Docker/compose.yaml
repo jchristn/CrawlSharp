@@ -1,16 +1,42 @@
 services:
 
   #
-  # CrawlSharp
+  # CrawlSharp Server
   # See https://hub.docker.com/r/jchristn77/crawlsharp
   # and https://github.com/jchristn/crawlsharp
   #
 
-  crawlsharp:
-    container_name: 'crawlsharp'
-    image: 'jchristn77/crawlsharp:v1.0.0'
-    network_mode: 'host'
+  crawlsharp-server:
+    container_name: crawlsharp-server
+    image: jchristn77/crawlsharp:latest
+    ports:
+      - "8000:8000"
     stdin_open: true
     tty: true
+    volumes:
+      - ./server/logs/:/app/logs/
+      - ./server/assets/:/app/assets/
     healthcheck:
-      test: curl --fail http://localhost:8000
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  #
+  # CrawlSharp Dashboard
+  # See https://hub.docker.com/r/jchristn77/crawlsharp-ui
+  #
+
+  crawlsharp-ui:
+    container_name: crawlsharp-ui
+    image: jchristn77/crawlsharp-ui:latest
+    ports:
+      - "8001:8001"
+    environment:
+      - CRAWLSHARP_SERVER_URL=
+    depends_on:
+      crawlsharp-server:
+        condition: service_healthy
+    restart: unless-stopped

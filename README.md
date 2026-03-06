@@ -6,10 +6,11 @@
 
 CrawlSharp is a library and integrated webserver for crawling basic web content.
 
-## New in v1.0.x   
+## New in v1.0.x
 
 - Initial release
 - Added support for headless browser crawling (using `Microsoft.Playwright`)
+- Retry with exponential backoff on HTTP 429 (Too Many Requests) responses
 
 ## Bugs, Feedback, or Enhancement Requests
 
@@ -34,7 +35,42 @@ using (WebCrawler crawler = new WebCrawler(settings))
 ```
 
 `WebCrawler.CrawlAsync` can be `await`ed, returning an `IAsyncEnumerable<WebResource>` whereas `WebCrawler.Crawl` cannot be `await`ed, returning an `IEnumerable<WebResource>`.
-  
+
+## Crawl Settings
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `UserAgent` | `string` | `CrawlSharp` | User agent string sent with requests |
+| `StartUrl` | `string` | `null` | The URL from which to begin crawling |
+| `UseHeadlessBrowser` | `bool` | `false` | Use a headless browser (Playwright) for crawling |
+| `IgnoreRobotsText` | `bool` | `false` | Ignore the robots.txt file |
+| `IncludeSitemap` | `bool` | `true` | Include URLs from sitemap.xml |
+| `FollowLinks` | `bool` | `true` | Follow links found on crawled pages |
+| `FollowRedirects` | `bool` | `true` | Follow HTTP redirect responses |
+| `RestrictToChildUrls` | `bool` | `true` | Only follow links that are children of the start URL |
+| `RestrictToSameSubdomain` | `bool` | `true` | Only follow links within the same subdomain |
+| `RestrictToSameRootDomain` | `bool` | `true` | Only follow links within the same root domain |
+| `AllowedDomains` | `List<string>` | `[]` | If non-empty, only these domains will be crawled |
+| `DeniedDomains` | `List<string>` | `[]` | If non-empty, these domains will be excluded |
+| `MaxCrawlDepth` | `int` | `5` | Maximum depth of links to follow from the start URL |
+| `ExcludeLinkPatterns` | `List<Regex>` | `[]` | Regex patterns for URLs to exclude from crawling |
+| `FollowExternalLinks` | `bool` | `true` | Follow links to external domains |
+| `MaxParallelTasks` | `int` | `8` | Maximum number of concurrent crawl tasks |
+| `PageTimeoutMs` | `int` | `30000` | Timeout in milliseconds for retrieving each page (minimum 1000) |
+| `ThrottleMs` | `int` | `5000` | Delay in milliseconds when a 429 response is received and retries are exhausted |
+| `RetryOn429` | `bool` | `true` | Enable automatic retry with backoff on 429 responses |
+| `MaxRetries` | `int` | `3` | Maximum number of retry attempts on 429 (minimum 1) |
+| `RetryMinBackoffMs` | `int` | `1000` | Minimum backoff delay in milliseconds (minimum 100) |
+| `RetryMaxBackoffMs` | `int` | `30000` | Maximum backoff delay in milliseconds (minimum 1000) |
+| `RetryBackoffJitter` | `bool` | `true` | Add random jitter to backoff delay to avoid thundering herd |
+| `RequestDelayMs` | `int` | `2500` | Delay in milliseconds between each HTTP request |
+
+### Retry on 429 (Too Many Requests)
+
+When `RetryOn429` is enabled, the crawler will automatically retry individual page retrievals that receive a `429` status code. Retries use exponential backoff: the delay for each attempt is calculated as `RetryMinBackoffMs * 2^attempt`, capped at `RetryMaxBackoffMs`. When `RetryBackoffJitter` is enabled, the actual delay is randomized between 0 and the computed value to avoid synchronized retries across parallel tasks.
+
+If all retry attempts are exhausted and the server still returns 429, the crawler falls back to the `ThrottleMs` delay and returns the 429 response as the result for that URL.
+
 ## Web Resources
 
 Objects crawled using CrawlSharp have the following properties:
@@ -70,7 +106,7 @@ $ dotnet CrawlSharp.Server
  | (__| | | (_| |\ V  V /| | |_      _|
   \___|_|  \__,_| \_/\_/ |_|   |_||_|
 
-(c)2025 Joel Christner
+(c)2026 Joel Christner
 
 
 Usage:
@@ -92,9 +128,66 @@ Webserver started on http://localhost:8000/
 
 Refer to `REST_API.md` for more information about using the RESTful API.
 
+## Dashboard
+
+CrawlSharp includes a web-based dashboard for configuring, launching, and monitoring crawls through your browser.  The dashboard is a React (Vite) application located in the `dashboard/` directory.
+
+### Features
+
+- **New Crawl** — configure all crawl and authentication settings through the UI and launch a crawl against the CrawlSharp server
+- **Active Crawl** — monitor a running crawl in real time with a live feed of discovered resources, status code distribution, and content type breakdown
+- **Crawl History** — view past crawl results, including per-page status, content types, sizes, and hashes
+- **Templates** — save, duplicate, and reuse crawl configurations for repeated jobs
+
+### Running the Dashboard Locally
+
+Prerequisites: [Node.js](https://nodejs.org/) (v18 or later).
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+The dashboard will start on `http://localhost:8001` and expects the CrawlSharp server to be running on `http://localhost:8000`.  The Vite dev server proxies `/crawl` requests to the server automatically.
+
+### Building for Production
+
+```bash
+cd dashboard
+npm run build
+```
+
+The compiled output is written to `dashboard/dist/` and can be served by any static file server.
+
+### Configuring the Server URL
+
+The dashboard determines the CrawlSharp server URL in the following order of precedence:
+
+1. **localStorage** — the value saved at key `crawlsharp_server_url` (set through the dashboard UI)
+2. **Runtime config** — the `CRAWLSHARP_SERVER_URL` value in `public/config.js`, which is overridden at container startup when running in Docker
+3. **Default** — `http://localhost:8000`
+
+### Running with Docker Compose
+
+The easiest way to run both the server and dashboard together is with Docker Compose.  The `Docker/compose.yaml` includes both the `crawlsharp-server` and `crawlsharp-ui` services.  The dashboard container uses nginx to reverse-proxy API requests to the CrawlSharp server internally, so no direct browser-to-server connectivity is needed.
+
+The `CRAWLSHARP_SERVER_URL` environment variable controls the server URL used by the dashboard.  When left empty (the default in Docker Compose), the dashboard routes API requests through its own nginx proxy.  When running the dashboard outside of Docker, set it to the server's URL (e.g. `http://localhost:8000`).
+
+To start both services:
+
+```bash
+cd Docker
+docker compose up -d
+```
+
+The server is available at `http://localhost:8000` and the dashboard at `http://localhost:8001`.
+
+Use `docker compose down` (or the provided `compose-down` scripts) to stop.
+
 ## Running in Docker
 
-A Docker image is available in [Docker Hub](https://hub.docker.com/r/jchristn77/crawlsharp) under `jchristn77/crawlsharp`.  Use the Docker Compose start (`compose-up.sh` and `compose-up.bat`) and stop (`compose-down.sh` and `compose-down.bat`) scripts in the `Docker` directory if you wish to run within Docker Compose. 
+A Docker image is available in [Docker Hub](https://hub.docker.com/r/jchristn77/crawlsharp) under `jchristn77/crawlsharp`.  Use the Docker Compose start (`compose-up.sh` and `compose-up.bat`) and stop (`compose-down.sh` and `compose-down.bat`) scripts in the `Docker` directory if you wish to run within Docker Compose.
 
 ## Using Headless Browser
 

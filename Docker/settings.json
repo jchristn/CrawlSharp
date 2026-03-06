@@ -1,0 +1,31 @@
+{
+  "Authentication": {
+    "Type": "None"
+  },
+  "Crawl": {
+    "UserAgent": "CrawlSharp",
+    "StartUrl": "https://somehost.com",
+    "UseHeadlessBrowser": false,
+    "IgnoreRobotsText": false,
+    "IncludeSitemap": true,
+    "FollowLinks": true,
+    "FollowRedirects": true,
+    "RestrictToChildUrls": false,
+    "RestrictToSameSubdomain": false,
+    "RestrictToSameRootDomain": true,
+    "AllowedDomains": [],
+    "DeniedDomains": [],
+    "MaxCrawlDepth": 2,
+    "ExcludeLinkPatterns": [],
+    "FollowExternalLinks": true,
+    "MaxParallelTasks": 16,
+    "PageTimeoutMs": 30000,
+    "ThrottleMs": 5000,
+    "RetryOn429": true,
+    "MaxRetries": 3,
+    "RetryMinBackoffMs": 1000,
+    "RetryMaxBackoffMs": 30000,
+    "RetryBackoffJitter": true,
+    "RequestDelayMs": 2500
+  }
+}

@@ -45,7 +45,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://alexnogle.com\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"MaxParallelTasks\": 16,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true\r\n  }\r\n}",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://alexnogle.com\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
 					"options": {
 						"raw": {
 							"language": "json"

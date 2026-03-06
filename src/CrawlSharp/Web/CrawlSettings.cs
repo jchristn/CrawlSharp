@@ -210,6 +210,86 @@ namespace CrawlSharp.Web
             }
         }
 
+        /// <summary>
+        /// Boolean indicating whether or not to retry requests that receive a 429 (Too Many Requests) response.
+        /// Default is true.
+        /// </summary>
+        public bool RetryOn429 { get; set; } = true;
+
+        /// <summary>
+        /// Maximum number of retry attempts when receiving a 429 response.
+        /// Default is 3.  Minimum value is 1.
+        /// </summary>
+        public int MaxRetries
+        {
+            get
+            {
+                return _MaxRetries;
+            }
+            set
+            {
+                if (value < 1) value = 1;
+                _MaxRetries = value;
+            }
+        }
+
+        /// <summary>
+        /// Minimum backoff time in milliseconds when retrying after a 429 response.
+        /// Default is 1000 (1 second).  Minimum value is 100.
+        /// </summary>
+        public int RetryMinBackoffMs
+        {
+            get
+            {
+                return _RetryMinBackoffMs;
+            }
+            set
+            {
+                if (value < 100) value = 100;
+                _RetryMinBackoffMs = value;
+            }
+        }
+
+        /// <summary>
+        /// Maximum backoff time in milliseconds when retrying after a 429 response.
+        /// Default is 30000 (30 seconds).  Minimum value is 1000.
+        /// </summary>
+        public int RetryMaxBackoffMs
+        {
+            get
+            {
+                return _RetryMaxBackoffMs;
+            }
+            set
+            {
+                if (value < 1000) value = 1000;
+                _RetryMaxBackoffMs = value;
+            }
+        }
+
+        /// <summary>
+        /// Boolean indicating whether or not to add random jitter to the backoff delay when retrying after a 429 response.
+        /// Default is true.
+        /// </summary>
+        public bool RetryBackoffJitter { get; set; } = true;
+
+        /// <summary>
+        /// The number of milliseconds to delay between each HTTP request.
+        /// Default is 2500.
+        /// </summary>
+        public int RequestDelayMs
+        {
+            get
+            {
+                return _RequestDelayMs;
+            }
+            set
+            {
+                if (value < 0) value = 0;
+                _RequestDelayMs = value;
+            }
+        }
+
         #endregion
 
         #region Private-Members
@@ -222,7 +302,11 @@ namespace CrawlSharp.Web
         private List<Regex> _ExcludeLinkPatterns = new List<Regex>();
         private int _MaxParallelTasks = 8;
         private int _PageTimeoutMs = 30000;
-        private int _ThrottleMs = 100;
+        private int _ThrottleMs = 5000;
+        private int _MaxRetries = 3;
+        private int _RetryMinBackoffMs = 1000;
+        private int _RetryMaxBackoffMs = 30000;
+        private int _RequestDelayMs = 2500;
 
         #endregion
 
