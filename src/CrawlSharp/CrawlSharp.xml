@@ -369,6 +369,12 @@
             Maximum number of tasks to run in parallel.  Default is 8.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.PageTimeoutMs">
+            <summary>
+            Timeout in milliseconds for retrieving each page.
+            Default is 30000 (30 seconds).  Minimum value is 1000.
+            </summary>
+        </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.ThrottleMs">
             <summary>
             The number of milliseconds to delay when receiving a 429 response.

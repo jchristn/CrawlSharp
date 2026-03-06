@@ -352,6 +352,7 @@
         {
             RestRequest req = new RestRequest(url);
             req.UserAgent = _Settings.Crawl.UserAgent;
+            req.TimeoutMilliseconds = _Settings.Crawl.PageTimeoutMs;
 
             if (_Settings.Authentication.Type != AuthenticationTypeEnum.None)
             {
@@ -389,7 +390,7 @@
             {
                 using var client = new HttpClient();
                 client.DefaultRequestHeaders.UserAgent.ParseAdd(_Settings.Crawl.UserAgent);
-                client.Timeout = TimeSpan.FromSeconds(10);
+                client.Timeout = TimeSpan.FromMilliseconds(_Settings.Crawl.PageTimeoutMs);
 
                 var request = new HttpRequestMessage(HttpMethod.Head, url);
 
@@ -609,7 +610,7 @@
                     response = await page.GotoAsync(normalizedUri.ToString(), new PageGotoOptions
                     {
                         WaitUntil = WaitUntilState.Load,
-                        Timeout = 30000
+                        Timeout = _Settings.Crawl.PageTimeoutMs
                     });
                 }
                 catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))

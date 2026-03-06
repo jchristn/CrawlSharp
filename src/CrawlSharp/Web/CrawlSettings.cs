@@ -178,6 +178,23 @@ namespace CrawlSharp.Web
         }
 
         /// <summary>
+        /// Timeout in milliseconds for retrieving each page.
+        /// Default is 30000 (30 seconds).  Minimum value is 1000.
+        /// </summary>
+        public int PageTimeoutMs
+        {
+            get
+            {
+                return _PageTimeoutMs;
+            }
+            set
+            {
+                if (value < 1000) value = 1000;
+                _PageTimeoutMs = value;
+            }
+        }
+
+        /// <summary>
         /// The number of milliseconds to delay when receiving a 429 response.
         /// </summary>
         public int ThrottleMs
@@ -204,6 +221,7 @@ namespace CrawlSharp.Web
         private int _MaxCrawlDepth = 5;
         private List<Regex> _ExcludeLinkPatterns = new List<Regex>();
         private int _MaxParallelTasks = 8;
+        private int _PageTimeoutMs = 30000;
         private int _ThrottleMs = 100;
 
         #endregion
