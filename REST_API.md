@@ -10,7 +10,10 @@ Use `POST` to `/crawl` to crawl a particular URL.  Set the `Content-Type` header
 
 `WebResource` objects are returned using server-sent events (SSE).
 
-Upon completion, `data` will be sent with the value `[end]`.
+Upon completion, `data` will be sent with the value `[DONE]`.
+
+When `UseHeadlessBrowser` is enabled for navigable pages, `WebResource.Data` contains rendered HTML captured from the browser DOM.
+`AutoExpandCollapsibles` is opt-in, ignored unless `UseHeadlessBrowser` is `true`, and can be combined with the delay and selector settings shown below.
 
 ```
 POST /crawl
@@ -23,6 +26,11 @@ Content-Type: application/json
     "UserAgent": "CrawlSharp",
     "StartUrl": "https://somehost.com",
     "UseHeadlessBrowser": false,
+    "AutoExpandCollapsibles": false,
+    "PostLoadDelayMs": 0,
+    "PostInteractionDelayMs": 250,
+    "MaxExpansionPasses": 2,
+    "ExpansionSelectors": [],
     "IgnoreRobotsText": false,
     "IncludeSitemap": true,
     "FollowLinks": true,
@@ -52,5 +60,5 @@ data: {"Url":"https://somehost.com/page1","ParentUrl":"https://somehost.com","De
 
 data: {"Url":"https://somehost.com/page2","ParentUrl":"https://somehost.com","Depth":1,"Status":200,"ContentLength":1234,"Headers":{"Age":"0","Cache-Control":"no-store, must-revalidate, no-cache, max-age=0, private","Date":"Sun, 02 Mar 2025 20:21:54 GMT","ETag":"\u0022b8w9q5o4vtzxw\u0022"},"Data":"[page data as base64]"}
 
-data: [end]
+data: [DONE]
 ```

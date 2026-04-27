@@ -416,6 +416,41 @@
             Default is 2500.
             </summary>
         </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.AutoExpandCollapsibles">
+            <summary>
+            Boolean indicating whether or not common collapsible content should be expanded
+            before capturing rendered HTML in headless browser mode.
+            Ignored when <see cref="P:CrawlSharp.Web.CrawlSettings.UseHeadlessBrowser"/> is false.
+            Default is false.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.PostLoadDelayMs">
+            <summary>
+            Optional delay in milliseconds after page navigation completes and before any
+            headless auto-expansion logic runs.  Ignored when headless auto-expansion is disabled.
+            Default is 0.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.PostInteractionDelayMs">
+            <summary>
+            Delay in milliseconds after each headless expansion pass to allow the DOM to settle.
+            Ignored when headless auto-expansion is disabled.
+            Default is 250.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.MaxExpansionPasses">
+            <summary>
+            Maximum number of headless expansion passes to attempt before capturing HTML.
+            Ignored when headless auto-expansion is disabled.
+            Default is 2.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.ExpansionSelectors">
+            <summary>
+            Additional CSS selectors to click during headless auto-expansion.
+            Ignored when headless auto-expansion is disabled.
+            </summary>
+        </member>
         <member name="M:CrawlSharp.Web.CrawlSettings.#ctor">
             <summary>
             Authentication settings.

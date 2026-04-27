@@ -17,6 +17,11 @@ const defaultConfig = {
   retryBackoffJitter: true,
   requestDelayMs: '2500',
   useHeadlessBrowser: false,
+  autoExpandCollapsibles: false,
+  postLoadDelayMs: '0',
+  postInteractionDelayMs: '250',
+  maxExpansionPasses: '2',
+  expansionSelectors: '',
   ignoreRobotsText: false,
   includeSitemap: true,
   followLinks: true,
@@ -342,6 +347,68 @@ export default function NewCrawlView({ serverUrl }) {
               <span className="toggle-slider" onClick={() => updateConfig('useHeadlessBrowser', !config.useHeadlessBrowser)} />
             </div>
           </div>
+          {config.useHeadlessBrowser && (
+            <>
+              <div className="toggle-group">
+                <div>
+                  <label>Auto-Expand Collapsibles</label>
+                  <div className="toggle-hint">Opt in to opening &lt;details&gt; elements and clicking common collapsible controls before HTML capture</div>
+                </div>
+                <div className="toggle-switch">
+                  <input type="checkbox" checked={config.autoExpandCollapsibles} onChange={e => updateConfig('autoExpandCollapsibles', e.target.checked)} />
+                  <span className="toggle-slider" onClick={() => updateConfig('autoExpandCollapsibles', !config.autoExpandCollapsibles)} />
+                </div>
+              </div>
+              {config.autoExpandCollapsibles ? (
+                <>
+                  <div className="form-row-3">
+                    <div className="form-group">
+                      <label>Post-Load Delay (ms)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={config.postLoadDelayMs}
+                        onChange={e => updateConfig('postLoadDelayMs', e.target.value)}
+                      />
+                      <p className="form-hint">Wait after navigation before expansion starts</p>
+                    </div>
+                    <div className="form-group">
+                      <label>Post-Interaction Delay (ms)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={config.postInteractionDelayMs}
+                        onChange={e => updateConfig('postInteractionDelayMs', e.target.value)}
+                      />
+                      <p className="form-hint">Allow the DOM to settle after each expansion pass</p>
+                    </div>
+                    <div className="form-group">
+                      <label>Max Expansion Passes</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={config.maxExpansionPasses}
+                        onChange={e => updateConfig('maxExpansionPasses', e.target.value)}
+                      />
+                      <p className="form-hint">Repeat expansion for nested lazy content</p>
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Expansion Selectors</label>
+                    <textarea
+                      rows="3"
+                      value={config.expansionSelectors}
+                      onChange={e => updateConfig('expansionSelectors', e.target.value)}
+                      placeholder={".faq-toggle\n[data-expand='more']"}
+                    />
+                    <p className="form-hint">Optional CSS selectors, one per line, to click in addition to the built-in collapsible patterns</p>
+                  </div>
+                </>
+              ) : (
+                <p className="form-hint">Headless expansion settings stay idle until auto-expand is enabled.</p>
+              )}
+            </>
+          )}
           <div className="toggle-group">
             <div>
               <label>Ignore robots.txt</label>

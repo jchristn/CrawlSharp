@@ -6,6 +6,11 @@ export function getServerUrl() {
   return DEFAULT_SERVER_URL
 }
 
+function parseIntSetting(value, fallback) {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isNaN(parsed) ? fallback : parsed
+}
+
 export async function checkServerHealth(serverUrl) {
   try {
     const url = serverUrl || '/healthz'
@@ -121,17 +126,21 @@ export function buildSettingsPayload(config) {
       RestrictToChildUrls: config.restrictToChildUrls !== false,
       RestrictToSameSubdomain: config.restrictToSameSubdomain !== false,
       RestrictToSameRootDomain: config.restrictToSameRootDomain !== false,
-      MaxCrawlDepth: parseInt(config.maxCrawlDepth) || 5,
+      MaxCrawlDepth: parseIntSetting(config.maxCrawlDepth, 5),
       FollowExternalLinks: config.followExternalLinks !== false,
-      MaxParallelTasks: parseInt(config.maxParallelTasks) || 8,
-      PageTimeoutMs: parseInt(config.pageTimeoutMs) || 30000,
-      ThrottleMs: parseInt(config.throttleMs) || 5000,
+      MaxParallelTasks: parseIntSetting(config.maxParallelTasks, 8),
+      PageTimeoutMs: parseIntSetting(config.pageTimeoutMs, 30000),
+      ThrottleMs: parseIntSetting(config.throttleMs, 5000),
       RetryOn429: config.retryOn429 !== false,
-      MaxRetries: parseInt(config.maxRetries) || 3,
-      RetryMinBackoffMs: parseInt(config.retryMinBackoffMs) || 1000,
-      RetryMaxBackoffMs: parseInt(config.retryMaxBackoffMs) || 30000,
+      MaxRetries: parseIntSetting(config.maxRetries, 3),
+      RetryMinBackoffMs: parseIntSetting(config.retryMinBackoffMs, 1000),
+      RetryMaxBackoffMs: parseIntSetting(config.retryMaxBackoffMs, 30000),
       RetryBackoffJitter: config.retryBackoffJitter !== false,
-      RequestDelayMs: parseInt(config.requestDelayMs) || 2500
+      RequestDelayMs: parseIntSetting(config.requestDelayMs, 2500),
+      AutoExpandCollapsibles: config.autoExpandCollapsibles === true,
+      PostLoadDelayMs: parseIntSetting(config.postLoadDelayMs, 0),
+      PostInteractionDelayMs: parseIntSetting(config.postInteractionDelayMs, 250),
+      MaxExpansionPasses: parseIntSetting(config.maxExpansionPasses, 2)
     }
   }
 
@@ -141,6 +150,10 @@ export function buildSettingsPayload(config) {
 
   if (config.deniedDomains && config.deniedDomains.trim()) {
     settings.Crawl.DeniedDomains = config.deniedDomains.split('\n').map(d => d.trim()).filter(Boolean)
+  }
+
+  if (config.expansionSelectors && config.expansionSelectors.trim()) {
+    settings.Crawl.ExpansionSelectors = config.expansionSelectors.split('\n').map(s => s.trim()).filter(Boolean)
   }
 
   if (config.authType && config.authType !== 'None') {

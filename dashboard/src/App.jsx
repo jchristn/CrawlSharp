@@ -35,7 +35,12 @@ export default function App() {
       <div className="app-layout">
         <Sidebar />
         <div className="main-wrapper">
-          <Topbar theme={theme} toggleTheme={toggleTheme} serverUrl={serverUrl} />
+          <Topbar
+            theme={theme}
+            toggleTheme={toggleTheme}
+            serverUrl={serverUrl}
+            updateServerUrl={updateServerUrl}
+          />
           <main className="main-content">
             <Routes>
               <Route path="/" element={<DashboardView serverUrl={serverUrl} />} />

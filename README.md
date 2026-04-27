@@ -6,11 +6,13 @@
 
 CrawlSharp is a library and integrated webserver for crawling basic web content.
 
-## New in v1.0.x
+## New in v1.0.22
 
-- Initial release
-- Added support for headless browser crawling (using `Microsoft.Playwright`)
-- Retry with exponential backoff on HTTP 429 (Too Many Requests) responses
+- Added opt-in auto-expansion of common collapsible content for headless crawls
+- Added tunable headless expansion delays, expansion pass count, and custom expansion selectors
+- Added a top-right dashboard server endpoint selector for proxy, localhost, and custom server URLs
+- Clarified rendered HTML capture behavior for headless navigable pages and direct-download handling for non-navigable assets
+- Added automated coverage for rendered HTML capture, revealed-link discovery, and PDF fallback behavior
 
 ## Bugs, Feedback, or Enhancement Requests
 
@@ -21,7 +23,8 @@ Please feel free to start an issue or a discussion!
 Embedding CrawlSharp into your application is simple and requires minimal configuration.  Refer to the ```Test``` project for a full example.
 
 ```csharp
-using CrawlSharp;
+using System.Collections.Generic;
+using CrawlSharp.Web;
 
 Settings settings = new Settings();
 settings.Crawl.StartUrl = "http://www.mywebpage.com";
@@ -36,6 +39,28 @@ using (WebCrawler crawler = new WebCrawler(settings))
 
 `WebCrawler.CrawlAsync` can be `await`ed, returning an `IAsyncEnumerable<WebResource>` whereas `WebCrawler.Crawl` cannot be `await`ed, returning an `IEnumerable<WebResource>`.
 
+Opt-in auto-expansion can be enabled for headless crawls when you need CrawlSharp to open common collapsible UI patterns before HTML capture:
+
+```csharp
+using CrawlSharp.Web;
+
+Settings settings = new Settings();
+settings.Crawl.StartUrl = "https://www.mywebpage.com";
+settings.Crawl.UseHeadlessBrowser = true;
+settings.Crawl.AutoExpandCollapsibles = true;
+settings.Crawl.PostLoadDelayMs = 500;
+settings.Crawl.ExpansionSelectors = new List<string>
+{
+  ".faq-toggle"
+};
+
+using (WebCrawler crawler = new WebCrawler(settings))
+{
+  await foreach (WebResource resource in crawler.CrawlAsync())
+    Console.WriteLine(resource.Status + ": " + resource.Url);
+}
+```
+
 ## Crawl Settings
 
 | Setting | Type | Default | Description |
@@ -43,6 +68,11 @@ using (WebCrawler crawler = new WebCrawler(settings))
 | `UserAgent` | `string` | `CrawlSharp` | User agent string sent with requests |
 | `StartUrl` | `string` | `null` | The URL from which to begin crawling |
 | `UseHeadlessBrowser` | `bool` | `false` | Use a headless browser (Playwright) for crawling |
+| `AutoExpandCollapsibles` | `bool` | `false` | Opt in to expanding common collapsible UI patterns before headless HTML capture |
+| `PostLoadDelayMs` | `int` | `0` | Delay in milliseconds after navigation and before headless auto-expansion starts |
+| `PostInteractionDelayMs` | `int` | `250` | Delay in milliseconds after each headless expansion pass |
+| `MaxExpansionPasses` | `int` | `2` | Maximum number of headless expansion passes before HTML capture |
+| `ExpansionSelectors` | `List<string>` | `[]` | Additional CSS selectors to click during headless auto-expansion |
 | `IgnoreRobotsText` | `bool` | `false` | Ignore the robots.txt file |
 | `IncludeSitemap` | `bool` | `true` | Include URLs from sitemap.xml |
 | `FollowLinks` | `bool` | `true` | Follow links found on crawled pages |
@@ -64,6 +94,26 @@ using (WebCrawler crawler = new WebCrawler(settings))
 | `RetryMaxBackoffMs` | `int` | `30000` | Maximum backoff delay in milliseconds (minimum 1000) |
 | `RetryBackoffJitter` | `bool` | `true` | Add random jitter to backoff delay to avoid thundering herd |
 | `RequestDelayMs` | `int` | `2500` | Delay in milliseconds between each HTTP request |
+
+### Rendered HTML in Headless Mode
+
+When `UseHeadlessBrowser` is enabled for navigable pages, CrawlSharp captures the rendered DOM HTML from Playwright and stores it in `WebResource.Data`.
+
+When headless crawling is not used, CrawlSharp returns the server response bytes directly. For non-navigable assets such as PDFs, CrawlSharp also uses direct HTTP retrieval even when headless crawling is enabled.
+
+### Headless Auto-Expand
+
+`AutoExpandCollapsibles` is disabled by default. Enable it when a page only inserts usable content into the DOM after a collapsible control is opened.
+
+When enabled in headless mode, CrawlSharp will:
+
+- Open closed `<details>` elements
+- Click a conservative set of common collapsible controls such as ARIA-backed toggles and Bootstrap collapse buttons
+- Apply any additional selectors supplied through `ExpansionSelectors`
+
+Use `PostLoadDelayMs` when a page hydrates UI after the browser `load` event. Use `PostInteractionDelayMs` and `MaxExpansionPasses` to give nested lazy content time to appear between expansion passes.
+
+`ExpansionSelectors` should stay narrow. Over-broad selectors can trigger unintended clicks and change the captured output.
 
 ### Retry on 429 (Too Many Requests)
 
@@ -134,6 +184,8 @@ CrawlSharp includes a web-based dashboard for configuring, launching, and monito
 
 ### Features
 
+- **Server selector** - switch the dashboard between proxy, localhost, and custom server endpoints from the top-right toolbar
+
 - **New Crawl** — configure all crawl and authentication settings through the UI and launch a crawl against the CrawlSharp server
 - **Active Crawl** — monitor a running crawl in real time with a live feed of discovered resources, status code distribution, and content type breakdown
 - **Crawl History** — view past crawl results, including per-page status, content types, sizes, and hashes
@@ -163,6 +215,8 @@ The compiled output is written to `dashboard/dist/` and can be served by any sta
 ### Configuring the Server URL
 
 The dashboard determines the CrawlSharp server URL in the following order of precedence:
+
+Use the top-right server endpoint icon in the dashboard toolbar to change the active endpoint without editing local storage by hand.
 
 1. **localStorage** — the value saved at key `crawlsharp_server_url` (set through the dashboard UI)
 2. **Runtime config** — the `CRAWLSHARP_SERVER_URL` value in `public/config.js`, which is overridden at container startup when running in Docker

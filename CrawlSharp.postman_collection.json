@@ -36,6 +36,7 @@
 			"name": "Crawl a site",
 			"request": {
 				"method": "POST",
+				"description": "Standard crawl request. When headless mode is enabled for navigable pages, CrawlSharp returns rendered HTML in WebResource.Data.",
 				"header": [
 					{
 						"key": "Content-Type",
@@ -45,7 +46,41 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://alexnogle.com\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://alexnogle.com\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"AutoExpandCollapsibles\": false,\r\n    \"PostLoadDelayMs\": 0,\r\n    \"PostInteractionDelayMs\": 250,\r\n    \"MaxExpansionPasses\": 2,\r\n    \"ExpansionSelectors\": [],\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{protocol}}{{hostname}}:{{port}}/crawl",
+					"host": [
+						"{{protocol}}{{hostname}}"
+					],
+					"port": "{{port}}",
+					"path": [
+						"crawl"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Crawl with headless auto-expand",
+			"request": {
+				"method": "POST",
+				"description": "Opt-in headless crawl that expands common collapsible content before HTML capture. Expansion settings are ignored unless UseHeadlessBrowser is true.",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://example.com\",\r\n    \"UseHeadlessBrowser\": true,\r\n    \"AutoExpandCollapsibles\": true,\r\n    \"PostLoadDelayMs\": 500,\r\n    \"PostInteractionDelayMs\": 250,\r\n    \"MaxExpansionPasses\": 2,\r\n    \"ExpansionSelectors\": [\r\n      \".faq-toggle\"\r\n    ],\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
 					"options": {
 						"raw": {
 							"language": "json"

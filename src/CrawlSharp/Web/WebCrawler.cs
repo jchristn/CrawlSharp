@@ -128,6 +128,14 @@
         private IBrowser _IBrowser = null;
 
         private readonly Random _RetryJitter = new Random();
+        private readonly string[] _BuiltInExpansionSelectors = new[]
+        {
+            "button[aria-expanded='false'][aria-controls]",
+            "[data-bs-toggle='collapse']",
+            "[data-toggle='collapse']",
+            "button.accordion-button.collapsed",
+            "[role='button'][aria-controls][aria-expanded='false']"
+        };
 
         private CancellationToken _Token;
         private Task _QueueProcessor = null;
@@ -358,10 +366,26 @@
             await Task.Delay(delay, token).ConfigureAwait(false);
         }
 
+        private async Task DelayIfNeeded(int delayMs, CancellationToken token)
+        {
+            if (delayMs <= 0) return;
+            await Task.Delay(delayMs, token).ConfigureAwait(false);
+        }
+
         private void Log(string msg)
         {
             if (String.IsNullOrEmpty(msg)) return;
             Logger?.Invoke(_Header + msg);
+        }
+
+        private bool IsAutoExpandEnabled(string contentType)
+        {
+            if (_Settings == null || _Settings.Crawl == null) return false;
+            if (!_Settings.Crawl.UseHeadlessBrowser || !_Settings.Crawl.AutoExpandCollapsibles) return false;
+            if (String.IsNullOrEmpty(contentType)) return true;
+
+            contentType = contentType.ToLowerInvariant();
+            return contentType.Contains("text/html") || contentType.Contains("application/xhtml+xml");
         }
 
         private RestRequest RequestBuilder(string url)
@@ -688,6 +712,22 @@
                         Log("status " + response.Status + " for URL " + normalizedUri);
                     }
 
+                    if (IsAutoExpandEnabled(contentType))
+                    {
+                        Log("headless auto-expand enabled for " + normalizedUri);
+                        if (_Settings.Crawl.PostLoadDelayMs > 0)
+                        {
+                            Log("waiting " + _Settings.Crawl.PostLoadDelayMs + "ms before auto-expand for " + normalizedUri);
+                            await DelayIfNeeded(_Settings.Crawl.PostLoadDelayMs, token).ConfigureAwait(false);
+                        }
+
+                        await ExpandCollapsibleContent(page, normalizedUri, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        Log("headless auto-expand disabled for " + normalizedUri);
+                    }
+
                     string content = await page.ContentAsync();
                     var headers = await response.AllHeadersAsync();
 
@@ -943,6 +983,166 @@
         {
             if (_DelayMilliseconds == 0) return;
             await Task.Delay(_DelayMilliseconds, token).ConfigureAwait(false);
+        }
+
+        private async Task ExpandCollapsibleContent(IPage page, Uri normalizedUri, CancellationToken token)
+        {
+            if (page == null) return;
+
+            int customSelectorCount = _Settings.Crawl.ExpansionSelectors != null
+                ? _Settings.Crawl.ExpansionSelectors.Count(s => !String.IsNullOrWhiteSpace(s))
+                : 0;
+
+            Log("auto-expand configured for " + normalizedUri
+                + ": passes " + _Settings.Crawl.MaxExpansionPasses
+                + ", custom selectors " + customSelectorCount);
+
+            for (int pass = 0; pass < _Settings.Crawl.MaxExpansionPasses; pass++)
+            {
+                token.ThrowIfCancellationRequested();
+
+                int detailsOpened = await OpenDetailsElements(page).ConfigureAwait(false);
+                int builtInClicks = await ExpandBuiltInTargets(page, token).ConfigureAwait(false);
+                int customClicks = await ExpandCustomSelectors(page, token).ConfigureAwait(false);
+                int totalChanges = detailsOpened + builtInClicks + customClicks;
+
+                Log("auto-expand pass " + (pass + 1) + "/" + _Settings.Crawl.MaxExpansionPasses
+                    + " for " + normalizedUri
+                    + ": details " + detailsOpened
+                    + ", built-in clicks " + builtInClicks
+                    + ", custom clicks " + customClicks);
+
+                if (totalChanges < 1)
+                {
+                    Log("auto-expand complete for " + normalizedUri + ", no additional changes detected");
+                    break;
+                }
+
+                await DelayIfNeeded(_Settings.Crawl.PostInteractionDelayMs, token).ConfigureAwait(false);
+            }
+        }
+
+        private async Task<int> OpenDetailsElements(IPage page)
+        {
+            if (page == null) return 0;
+
+            try
+            {
+                return await page.EvaluateAsync<int>(
+                    @"() => {
+                        let changed = 0;
+                        document.querySelectorAll('details').forEach((element) => {
+                            if (!element.open) {
+                                element.open = true;
+                                changed++;
+                            }
+                        });
+                        return changed;
+                    }").ConfigureAwait(false);
+            }
+            catch (PlaywrightException ex)
+            {
+                Log("auto-expand unable to open <details> elements: " + ex.Message);
+                return 0;
+            }
+        }
+
+        private async Task<int> ExpandBuiltInTargets(IPage page, CancellationToken token)
+        {
+            return await ClickSelectorTargets(page, _BuiltInExpansionSelectors, token).ConfigureAwait(false);
+        }
+
+        private async Task<int> ExpandCustomSelectors(IPage page, CancellationToken token)
+        {
+            if (_Settings.Crawl.ExpansionSelectors == null || _Settings.Crawl.ExpansionSelectors.Count < 1)
+                return 0;
+
+            int clicks = 0;
+
+            foreach (string selector in _Settings.Crawl.ExpansionSelectors)
+            {
+                if (String.IsNullOrWhiteSpace(selector)) continue;
+
+                try
+                {
+                    clicks += await ClickSelectorTargets(page, new[] { selector }, token).ConfigureAwait(false);
+                }
+                catch (PlaywrightException ex)
+                {
+                    Log("auto-expand custom selector failed '" + selector + "': " + ex.Message);
+                }
+            }
+
+            return clicks;
+        }
+
+        private async Task<int> ClickSelectorTargets(IPage page, IEnumerable<string> selectors, CancellationToken token)
+        {
+            if (page == null || selectors == null) return 0;
+
+            List<string> selectorList = selectors
+                .Where(s => !String.IsNullOrWhiteSpace(s))
+                .Distinct()
+                .ToList();
+
+            if (selectorList.Count < 1) return 0;
+
+            string selector = String.Join(", ", selectorList);
+            ILocator locator = page.Locator(selector);
+            int count;
+
+            try
+            {
+                count = await locator.CountAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException ex)
+            {
+                Log("auto-expand selector lookup failed '" + selector + "': " + ex.Message);
+                return 0;
+            }
+
+            int clicks = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                ILocator target = locator.Nth(i);
+
+                try
+                {
+                    if (!await target.IsVisibleAsync().ConfigureAwait(false))
+                        continue;
+
+                    bool disabled = await target.EvaluateAsync<bool>(
+                        @"el => !!(el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true')")
+                        .ConfigureAwait(false);
+                    if (disabled) continue;
+
+                    string href = await target.EvaluateAsync<string>(
+                        @"el => el.tagName && el.tagName.toLowerCase() === 'a' ? (el.getAttribute('href') || '') : ''")
+                        .ConfigureAwait(false);
+                    if (!String.IsNullOrEmpty(href)
+                        && !href.StartsWith("#", StringComparison.Ordinal)
+                        && !href.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    await target.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
+                    await target.ClickAsync(new LocatorClickOptions
+                    {
+                        Timeout = 1000
+                    }).ConfigureAwait(false);
+
+                    clicks++;
+                }
+                catch (PlaywrightException ex)
+                {
+                    Log("auto-expand click skipped for selector '" + selector + "': " + ex.Message);
+                }
+            }
+
+            return clicks;
         }
 
         private List<string> ExtractLinksFromHtml(string url, byte[] bytes)
