@@ -52,7 +52,7 @@
             {
                 Hostname = _Hostname,
                 Port = _Port,
-                Ssl = new WebserverSettings.SslSettings
+                Ssl = new WatsonWebserver.Core.Settings.SslSettings
                 {
                     Enable = false
                 }

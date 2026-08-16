@@ -27,6 +27,8 @@ namespace Test.Shared
                     SitemapParserSuite.Build(),
                     HashHelperSuite.Build(),
                     WebCrawlerSuite.Build(),
+                    AuthenticationCrawlSuite.Build(),
+                    DomainFilterSuite.Build(),
                     HeadlessSuite.Build()
                 };
             }
