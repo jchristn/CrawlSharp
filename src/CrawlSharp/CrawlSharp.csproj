@@ -1,8 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-		<Version>1.0.22</Version>
+		<Version>1.1.0</Version>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<DocumentationFile>CrawlSharp.xml</DocumentationFile>
@@ -17,7 +17,7 @@
 		<RepositoryUrl>https://github.com/jchristn/CrawlSharp</RepositoryUrl>
 		<RepositoryType>github</RepositoryType>
 		<PackageTags>web crawl crawler</PackageTags>
-		<PackageReleaseNotes>Added opt-in headless auto-expansion for collapsible content, updated headless crawl documentation, and added automated rendered HTML coverage.</PackageReleaseNotes>
+		<PackageReleaseNotes>Redirects are followed by CrawlSharp with loop detection and a MaxRedirects limit, so redirect loops no longer hang a crawl; credentials are sent only to the start origin (plus CredentialOrigins), authentication settings are validated, and WebResource gains FinalUrl, RedirectChain and RedirectOutcome. FollowRedirects = false now returns the redirect response itself.</PackageReleaseNotes>
 		<PackageLicenseFile>LICENSE.md</PackageLicenseFile>
 		<IncludeSymbols>True</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
@@ -45,7 +45,7 @@
 	<ItemGroup>
 	  <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
 	  <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
-	  <PackageReference Include="RestWrapper" Version="3.2.0" />
+	  <PackageReference Include="RestWrapper" Version="3.3.1" />
 	  <PackageReference Include="SerializationHelper" Version="2.0.3" />
 	</ItemGroup>
 

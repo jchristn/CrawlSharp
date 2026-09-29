@@ -178,6 +178,15 @@
                 return;
             }
 
+            if (e is ArgumentException)
+            {
+                // Invalid settings, such as incomplete authentication or an out-of-range value.  WebCrawler validates in its
+                // constructor, before the response switches to server-sent events, so a clean 400 can still be returned.
+                ctx.Response.StatusCode = 400;
+                await ctx.Response.Send(_Serializer.SerializeJson(new ApiErrorResponse(ApiErrorEnum.BadRequest, null, e.Message), true));
+                return;
+            }
+
             ctx.Response.StatusCode = 500;
             await ctx.Response.Send(_Serializer.SerializeJson(new ApiErrorResponse(ApiErrorEnum.InternalError), true));
             return;
@@ -231,12 +240,10 @@
 
             Settings settings = _Serializer.DeserializeJson<Settings>(ctx.Request.DataAsString);
 
-            WebCrawler crawler = new WebCrawler(settings);
-
-            ctx.Response.ServerSentEvents = true;
-
+            using (WebCrawler crawler = new WebCrawler(settings))
             using (Timestamp ts = new Timestamp())
             {
+                ctx.Response.ServerSentEvents = true;
                 ts.Start = DateTime.UtcNow;
 
                 _Logging.Debug(_Header + "crawl request received from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl);

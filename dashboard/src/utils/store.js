@@ -47,9 +47,12 @@ export function clearCrawlHistory() {
 // Resources for a crawl (stored separately to avoid bloating history list)
 export function saveCrawlResources(crawlId, resources) {
   try {
-    // Strip Data field to save space — keep metadata only
+    // Strip Data field to save space; keep metadata only
     const lightweight = resources.map(r => ({
       Url: r.Url,
+      FinalUrl: r.FinalUrl,
+      RedirectChain: r.RedirectChain,
+      RedirectOutcome: r.RedirectOutcome,
       ParentUrl: r.ParentUrl,
       Filename: r.Filename,
       Depth: r.Depth,
@@ -65,7 +68,7 @@ export function saveCrawlResources(crawlId, resources) {
     }))
     localStorage.setItem(`crawlsharp_resources_${crawlId}`, JSON.stringify(lightweight))
   } catch {
-    // localStorage might be full — that's ok
+    // localStorage might be full; that's ok
   }
 }
 

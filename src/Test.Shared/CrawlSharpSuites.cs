@@ -26,7 +26,9 @@ namespace Test.Shared
                     RobotsFileSuite.Build(),
                     SitemapParserSuite.Build(),
                     HashHelperSuite.Build(),
+                    RedirectPolicySuite.Build(),
                     WebCrawlerSuite.Build(),
+                    RedirectSuite.Build(),
                     AuthenticationCrawlSuite.Build(),
                     DomainFilterSuite.Build(),
                     HeadlessSuite.Build()

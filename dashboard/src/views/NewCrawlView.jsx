@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { buildSettingsPayload } from '../utils/api.js'
+import { buildSettingsPayload, validateAuthConfig } from '../utils/api.js'
 import { getTemplates, generateId, saveCrawlToHistory, saveTemplate } from '../utils/store.js'
 
 const defaultConfig = {
@@ -26,6 +26,7 @@ const defaultConfig = {
   includeSitemap: true,
   followLinks: true,
   followRedirects: true,
+  maxRedirects: '10',
   followExternalLinks: true,
   restrictToChildUrls: true,
   restrictToSameSubdomain: true,
@@ -37,7 +38,16 @@ const defaultConfig = {
   authPassword: '',
   authApiKeyHeader: '',
   authApiKey: '',
-  authBearerToken: ''
+  authBearerToken: '',
+  authCredentialOrigins: ''
+}
+
+const authFieldLabels = {
+  authUsername: 'Username',
+  authApiKeyHeader: 'Header Name',
+  authApiKey: 'API Key',
+  authBearerToken: 'Bearer Token',
+  authCredentialOrigins: 'Additional Credential Origins'
 }
 
 export default function NewCrawlView({ serverUrl }) {
@@ -62,8 +72,15 @@ export default function NewCrawlView({ serverUrl }) {
     setConfig(prev => ({ ...prev, [key]: value }))
   }
 
+  const authErrors = validateAuthConfig(config)
+  const authErrorKeys = Object.keys(authErrors)
+  const canStart = !!config.startUrl.trim() && authErrorKeys.length === 0
+
+  const fieldClass = (key) => `form-group${authErrors[key] ? ' has-error' : ''}`
+  const FieldError = ({ field }) => authErrors[field] ? <p className="form-error">{authErrors[field]}</p> : null
+
   const handleStartCrawl = () => {
-    if (!config.startUrl.trim()) return
+    if (!canStart) return
 
     const crawlId = generateId()
 
@@ -122,6 +139,15 @@ export default function NewCrawlView({ serverUrl }) {
       )}
 
       <div className="card">
+        {authErrorKeys.length > 0 && (
+          <div className="form-summary-error" role="alert">
+            Fix the authentication settings before starting the crawl:
+            <ul>
+              {authErrorKeys.map(key => <li key={key}>{authFieldLabels[key]}: {authErrors[key]}</li>)}
+            </ul>
+          </div>
+        )}
+
         <div className="form-group">
           <label>Start URL *</label>
           <input
@@ -188,7 +214,7 @@ export default function NewCrawlView({ serverUrl }) {
                 value={config.throttleMs}
                 onChange={e => updateConfig('throttleMs', e.target.value)}
               />
-              <p className="form-hint">Delay on 429 responses</p>
+              <p className="form-hint">Pause after a 429 once retries are off or used up</p>
             </div>
           </div>
           <div className="form-row">
@@ -200,7 +226,7 @@ export default function NewCrawlView({ serverUrl }) {
                 value={config.requestDelayMs}
                 onChange={e => updateConfig('requestDelayMs', e.target.value)}
               />
-              <p className="form-hint">Delay between each request</p>
+              <p className="form-hint">Pause before every request, per parallel task; robots.txt Crawl-delay overrides it</p>
             </div>
             <div></div>
           </div>
@@ -290,13 +316,29 @@ export default function NewCrawlView({ serverUrl }) {
           <div className="toggle-group">
             <div>
               <label>Follow Redirects</label>
-              <div className="toggle-hint">Automatically follow HTTP redirects</div>
+              <div className="toggle-hint">The crawler follows redirects itself, stops on loops, and sends credentials only to the start URL's origin. When off, the redirect response itself is returned.</div>
             </div>
             <div className="toggle-switch">
               <input type="checkbox" checked={config.followRedirects} onChange={e => updateConfig('followRedirects', e.target.checked)} />
               <span className="toggle-slider" onClick={() => updateConfig('followRedirects', !config.followRedirects)} />
             </div>
           </div>
+          {config.followRedirects && (
+            <div className="form-row">
+              <div className="form-group">
+                <label>Max Redirects</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={config.maxRedirects}
+                  onChange={e => updateConfig('maxRedirects', e.target.value)}
+                />
+                <p className="form-hint">Redirects to follow for one page before giving up (1 to 50)</p>
+              </div>
+              <div></div>
+            </div>
+          )}
           <div className="toggle-group">
             <div>
               <label>Follow External Links</label>
@@ -483,9 +525,10 @@ export default function NewCrawlView({ serverUrl }) {
 
           {config.authType === 'Basic' && (
             <div className="form-row">
-              <div className="form-group">
-                <label>Username</label>
-                <input type="text" value={config.authUsername} onChange={e => updateConfig('authUsername', e.target.value)} />
+              <div className={fieldClass('authUsername')}>
+                <label>Username *</label>
+                <input type="text" value={config.authUsername} onChange={e => updateConfig('authUsername', e.target.value)} aria-invalid={!!authErrors.authUsername} />
+                <FieldError field="authUsername" />
               </div>
               <div className="form-group">
                 <label>Password</label>
@@ -496,21 +539,39 @@ export default function NewCrawlView({ serverUrl }) {
 
           {config.authType === 'ApiKey' && (
             <div className="form-row">
-              <div className="form-group">
-                <label>Header Name</label>
-                <input type="text" value={config.authApiKeyHeader} onChange={e => updateConfig('authApiKeyHeader', e.target.value)} placeholder="X-Api-Key" />
+              <div className={fieldClass('authApiKeyHeader')}>
+                <label>Header Name *</label>
+                <input type="text" value={config.authApiKeyHeader} onChange={e => updateConfig('authApiKeyHeader', e.target.value)} placeholder="X-Api-Key" aria-invalid={!!authErrors.authApiKeyHeader} />
+                <FieldError field="authApiKeyHeader" />
               </div>
-              <div className="form-group">
-                <label>API Key</label>
-                <input type="password" value={config.authApiKey} onChange={e => updateConfig('authApiKey', e.target.value)} />
+              <div className={fieldClass('authApiKey')}>
+                <label>API Key *</label>
+                <input type="password" value={config.authApiKey} onChange={e => updateConfig('authApiKey', e.target.value)} aria-invalid={!!authErrors.authApiKey} />
+                <FieldError field="authApiKey" />
               </div>
             </div>
           )}
 
           {config.authType === 'BearerToken' && (
-            <div className="form-group">
-              <label>Bearer Token</label>
-              <input type="password" value={config.authBearerToken} onChange={e => updateConfig('authBearerToken', e.target.value)} />
+            <div className={fieldClass('authBearerToken')}>
+              <label>Bearer Token *</label>
+              <input type="password" value={config.authBearerToken} onChange={e => updateConfig('authBearerToken', e.target.value)} aria-invalid={!!authErrors.authBearerToken} />
+              <FieldError field="authBearerToken" />
+            </div>
+          )}
+
+          {config.authType !== 'None' && (
+            <div className={fieldClass('authCredentialOrigins')}>
+              <label>Additional Credential Origins</label>
+              <textarea
+                rows="2"
+                value={config.authCredentialOrigins}
+                onChange={e => updateConfig('authCredentialOrigins', e.target.value)}
+                placeholder={'https://docs.example.com\nhttps://api.example.com'}
+                aria-invalid={!!authErrors.authCredentialOrigins}
+              />
+              <FieldError field="authCredentialOrigins" />
+              <p className="form-hint">Credentials go only to the start URL's origin (plus its HTTPS version for an HTTP start URL). List any other origins, one per line, that should also receive them.</p>
             </div>
           )}
         </div>
@@ -535,8 +596,8 @@ export default function NewCrawlView({ serverUrl }) {
           <button
             className="btn btn-primary"
             onClick={handleStartCrawl}
-            disabled={!config.startUrl.trim()}
-            style={{ opacity: config.startUrl.trim() ? 1 : 0.5 }}
+            disabled={!canStart}
+            style={{ opacity: canStart ? 1 : 0.5 }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="5 3 19 12 5 21 5 3" />

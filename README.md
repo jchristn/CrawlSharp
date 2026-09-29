@@ -6,13 +6,13 @@
 
 CrawlSharp is a library and integrated webserver for crawling basic web content.
 
-## New in v1.0.22
+## New in v1.1.0
 
-- Added opt-in auto-expansion of common collapsible content for headless crawls
-- Added tunable headless expansion delays, expansion pass count, and custom expansion selectors
-- Added a top-right dashboard server endpoint selector for proxy, localhost, and custom server URLs
-- Clarified rendered HTML capture behavior for headless navigable pages and direct-download handling for non-navigable assets
-- Added automated coverage for rendered HTML capture, revealed-link discovery, and PDF fallback behavior
+- Redirects are followed by CrawlSharp itself, one hop at a time: a redirect loop ends after one pass instead of hanging the crawl, and chains stop at `MaxRedirects` (default 10)
+- Credentials are sent only to the start URL's origin (plus its HTTPS version and any `Authentication.CredentialOrigins`), are re-attached to same-origin redirect targets, and never reach another origin
+- `WebResource` gains `FinalUrl`, `RedirectChain` and `RedirectOutcome`, and links on a redirected page resolve against its final URL
+- Incomplete or ambiguous `Authentication` settings throw from the `WebCrawler` constructor, and the server answers `400`
+- `FollowRedirects = false` now returns the redirect response itself; see [Upgrading to 1.1.0](#upgrading-to-110)
 
 ## Bugs, Feedback, or Enhancement Requests
 
@@ -76,7 +76,8 @@ using (WebCrawler crawler = new WebCrawler(settings))
 | `IgnoreRobotsText` | `bool` | `false` | Ignore the robots.txt file |
 | `IncludeSitemap` | `bool` | `true` | Include URLs from sitemap.xml |
 | `FollowLinks` | `bool` | `true` | Follow links found on crawled pages |
-| `FollowRedirects` | `bool` | `true` | Follow HTTP redirect responses |
+| `FollowRedirects` | `bool` | `true` | Follow redirects (with loop detection, scope checks and origin-scoped credentials); when `false`, the redirect response itself is returned. See [Redirects](#redirects) |
+| `MaxRedirects` | `int` | `10` | Maximum redirects to follow for one resource (1 to 50; values outside throw) |
 | `RestrictToChildUrls` | `bool` | `true` | Only follow links that are children of the start URL |
 | `RestrictToSameSubdomain` | `bool` | `true` | Only follow links within the same subdomain |
 | `RestrictToSameRootDomain` | `bool` | `true` | Only follow links within the same root domain |
@@ -87,13 +88,13 @@ using (WebCrawler crawler = new WebCrawler(settings))
 | `FollowExternalLinks` | `bool` | `true` | Follow links to external domains |
 | `MaxParallelTasks` | `int` | `8` | Maximum number of concurrent crawl tasks |
 | `PageTimeoutMs` | `int` | `30000` | Timeout in milliseconds for retrieving each page (minimum 1000) |
-| `ThrottleMs` | `int` | `5000` | Delay in milliseconds when a 429 response is received and retries are exhausted |
+| `ThrottleMs` | `int` | `5000` | One pause in milliseconds before a 429 is returned as the result, taken only when `RetryOn429` is `false` or its retries are used up (minimum 0). See [Pacing](#pacing) |
 | `RetryOn429` | `bool` | `true` | Enable automatic retry with backoff on 429 responses |
 | `MaxRetries` | `int` | `3` | Maximum number of retry attempts on 429 (minimum 1) |
 | `RetryMinBackoffMs` | `int` | `1000` | Minimum backoff delay in milliseconds (minimum 100) |
 | `RetryMaxBackoffMs` | `int` | `30000` | Maximum backoff delay in milliseconds (minimum 1000) |
 | `RetryBackoffJitter` | `bool` | `true` | Add random jitter to backoff delay to avoid thundering herd |
-| `RequestDelayMs` | `int` | `2500` | Delay in milliseconds between each HTTP request |
+| `RequestDelayMs` | `int` | `2500` | Pause in milliseconds before every request (pages, robots.txt, sitemap.xml, redirect hops), per parallel task; a robots.txt `Crawl-delay` replaces it (minimum 0). See [Pacing](#pacing) |
 
 ### Rendered HTML in Headless Mode
 
@@ -121,11 +122,99 @@ When `RetryOn429` is enabled, the crawler will automatically retry individual pa
 
 If all retry attempts are exhausted and the server still returns 429, the crawler falls back to the `ThrottleMs` delay and returns the 429 response as the result for that URL.
 
+### Pacing
+
+Two settings control delays, and they do different jobs:
+
+| Setting | When it applies | Notes |
+|---|---|---|
+| `RequestDelayMs` | Before every request: pages, robots.txt, sitemap.xml and each redirect hop | Taken per parallel task, so with `MaxParallelTasks = 8` up to eight requests can start per interval. A robots.txt `Crawl-delay` replaces it entirely, whether higher or lower; `WebCrawler.Delay` shows the value in effect |
+| `ThrottleMs` | Once, after a 429 response, just before that 429 is returned as the result | Only when `RetryOn429` is `false` or its `MaxRetries` are used up. It does not pace normal requests |
+
+To crawl politely, tune `RequestDelayMs` and `MaxParallelTasks` together. `ThrottleMs` only matters once a server has started refusing requests.
+
+### Redirects
+
+CrawlSharp follows redirects itself rather than letting the HTTP stack do it, so every hop gets the same checks:
+
+- **Hop limit**: at most `MaxRedirects` redirects (default 10) are followed per resource. A longer chain stops with `RedirectOutcome = MaxRedirectsExceeded`, and the hop past the limit is not requested.
+- **Loop detection**: when a chain returns to a URL it already requested (with the same cookies), it stops with `LoopDetected`. An A to B to A loop requests each URL once, and the rest of the crawl carries on.
+- **Cookies**: cookies set by one hop are sent on the next hop of the same chain, so a consent wall or session bootstrap that sets a cookie and redirects back works. Cookies are not shared between pages.
+- **Scope**: when `FollowLinks` is `true`, a redirect target must pass the same filters as a link (`RestrictToChildUrls`, `RestrictToSameSubdomain`, `RestrictToSameRootDomain`, `AllowedDomains`, `DeniedDomains`, `FollowExternalLinks`, `ExcludeLinkPatterns`); one that does not is not requested and the result has `OutOfScope`. robots.txt and sitemap.xml redirects are followed only on the start URL's host.
+- **robots.txt**: a redirect to a disallowed path is not requested (`RobotsDisallowed`).
+- **Credentials** are attached per hop according to the [credential scope](#authentication).
+- **Pacing**: `RequestDelayMs` applies before each hop.
+
+The resource that comes back always describes what happened. `Url` is the requested address, `FinalUrl` is where the content came from, `RedirectChain` lists each redirect, and `RedirectOutcome` is one of:
+
+| Outcome | Meaning |
+|---|---|
+| `None` | The first response was not a redirect |
+| `Followed` | One or more redirects were followed to a response that is not a redirect |
+| `NotFollowed` | `FollowRedirects` is `false`; the redirect response is the result |
+| `LoopDetected` | The chain returned to a URL it had already requested |
+| `MaxRedirectsExceeded` | The chain was longer than `MaxRedirects` |
+| `OutOfScope` | The target is outside the crawl scope and was not requested |
+| `RobotsDisallowed` | The target is disallowed by robots.txt and was not requested |
+| `MissingLocation` | A redirect status arrived without a `Location` header |
+| `InvalidLocation` | The `Location` header is not a valid http or https URL |
+
+For every outcome other than `None` and `Followed`, `Status` and `Data` come from the last redirect response, not from page content, and links in that body are not followed.
+
+Only 301, 302, 303, 307 and 308 are redirects, plus 300 when it carries a `Location`; 304 Not Modified is returned as-is. Links on a redirected page resolve against `FinalUrl`, so `/docs` redirecting to `/docs/` resolves `guide.html` to `/docs/guide.html`. When two URLs redirect to the same page, the page is fetched and returned once.
+
+Configure the canonical start URL. If `https://example.com` redirects to `https://www.example.com` and `RestrictToSameSubdomain` is on, the start page comes back as `OutOfScope`, and its `RedirectChain` shows the address to use instead.
+
+When `UseHeadlessBrowser` is enabled, CrawlSharp resolves the chain with a HEAD request before starting the browser, then navigates straight to the final URL, so the same limits apply. A page that redirects differently on GET is resolved again with GET before navigating.
+
+## Authentication
+
+Set `Settings.Authentication` to crawl a site that needs credentials:
+
+| `Type` | Required fields | Sent as |
+|---|---|---|
+| `None` (default) | none; every credential field must be empty | nothing |
+| `Basic` | `Username` (`Password` optional) | `Authorization: Basic ...` |
+| `BearerToken` | `BearerToken` | `Authorization: Bearer ...` |
+| `ApiKey` | `ApiKeyHeader` and `ApiKey` | the header named by `ApiKeyHeader` |
+
+```csharp
+Settings settings = new Settings();
+settings.Crawl.StartUrl = "https://intranet.example.com";
+settings.Authentication = new AuthenticationSettings
+{
+  Type = AuthenticationTypeEnum.Basic,
+  Username = "crawler",
+  Password = "secret"
+};
+```
+
+**Validation.** The `WebCrawler` constructor calls `AuthenticationSettings.Validate()` and throws `ArgumentException` when the settings are incomplete or ambiguous: credential fields set while `Type` is `None`, a missing required field, or an invalid `CredentialOrigins` entry. Empty and whitespace strings count as unset. The REST server returns these as `400 Bad Request`.
+
+**Credential scope.** Credentials are sent only to requests whose origin (scheme, host and port) is one of:
+
+- the origin of `StartUrl`
+- when `StartUrl` is plain HTTP, the HTTPS origin on the same host (the common HTTP to HTTPS upgrade)
+- any origin listed in `Authentication.CredentialOrigins`, for sites that span several origins, for example `"https://docs.example.com"`
+
+The rule applies per request and per redirect hop, for the REST client and the headless browser alike. A same-origin redirect target gets credentials; a redirect or link to another origin never does, and an HTTPS start URL never sends credentials to an HTTP downgrade.
+
+## Upgrading to 1.1.0
+
+- **`FollowRedirects = false` is now literal.** In 1.0.22 the HTTP stack followed redirects regardless of this setting, so `false` still returned the final page. It now returns the redirect response (usually an empty 3xx) with `RedirectOutcome = NotFollowed`. If you set `false` to avoid the redirect-loop hang, set it back to `true` (the default): loops are now detected.
+- **Credentials stay on their origin.** 1.0.22 attached credentials to every request, including external links and other origins reached by redirects. An authenticated crawl that spans several origins now needs those origins in `Authentication.CredentialOrigins`.
+- **Authentication settings are validated.** Credentials with `Type = None`, which were silently ignored, now throw. So does an incomplete configuration such as `Type = ApiKey` without `ApiKeyHeader`, which used to produce an empty crawl.
+- **304, 305 and 306 are no longer treated as redirects.**
+- **`Url` is the requested address.** Read `FinalUrl` for the address the content came from.
+
 ## Web Resources
 
 Objects crawled using CrawlSharp have the following properties:
 
-- `Url` - the URL from which the resource was retrieved
+- `Url` - the URL that was requested
+- `FinalUrl` - the URL the content in `Data` came from; equal to `Url` when there was no redirect
+- `RedirectChain` - the redirects received, in order, each with `Url`, `Status` and `Location`; empty when there was no redirect
+- `RedirectOutcome` - why redirect following stopped; see [Redirects](#redirects)
 - `ParentUrl` - the URL from which the `Url` was identified
 - `Filename` - the filename component from the URL, if any
 - `Depth` - the depth level at which the `Url` was identified
@@ -186,10 +275,10 @@ CrawlSharp includes a web-based dashboard for configuring, launching, and monito
 
 - **Server selector** - switch the dashboard between proxy, localhost, and custom server endpoints from the top-right toolbar
 
-- **New Crawl** — configure all crawl and authentication settings through the UI and launch a crawl against the CrawlSharp server
-- **Active Crawl** — monitor a running crawl in real time with a live feed of discovered resources, status code distribution, and content type breakdown
-- **Crawl History** — view past crawl results, including per-page status, content types, sizes, and hashes
-- **Templates** — save, duplicate, and reuse crawl configurations for repeated jobs
+- **New Crawl** - configure all crawl and authentication settings through the UI and launch a crawl against the CrawlSharp server
+- **Active Crawl** - monitor a running crawl in real time with a live feed of discovered resources, status code distribution, and content type breakdown
+- **Crawl History** - view past crawl results, including per-page status, content types, sizes, and hashes
+- **Templates** - save, duplicate, and reuse crawl configurations for repeated jobs
 
 ### Running the Dashboard Locally
 
@@ -218,9 +307,9 @@ The dashboard determines the CrawlSharp server URL in the following order of pre
 
 Use the top-right server endpoint icon in the dashboard toolbar to change the active endpoint without editing local storage by hand.
 
-1. **localStorage** — the value saved at key `crawlsharp_server_url` (set through the dashboard UI)
-2. **Runtime config** — the `CRAWLSHARP_SERVER_URL` value in `public/config.js`, which is overridden at container startup when running in Docker
-3. **Default** — `http://localhost:8000`
+1. **localStorage** - the value saved at key `crawlsharp_server_url` (set through the dashboard UI)
+2. **Runtime config** - the `CRAWLSHARP_SERVER_URL` value in `public/config.js`, which is overridden at container startup when running in Docker
+3. **Default** - `http://localhost:8000`
 
 ### Running with Docker Compose
 

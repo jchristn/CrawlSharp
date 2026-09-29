@@ -30,6 +30,7 @@ namespace Test.Shared.Suites
                     Check.True(s.IncludeSitemap);
                     Check.True(s.FollowLinks);
                     Check.True(s.FollowRedirects);
+                    Check.Equal(10, s.MaxRedirects);
                     Check.True(s.RestrictToChildUrls);
                     Check.True(s.RestrictToSameSubdomain);
                     Check.True(s.RestrictToSameRootDomain);
@@ -113,6 +114,24 @@ namespace Test.Shared.Suites
                 {
                     CrawlSettings s = new CrawlSettings();
                     Check.Throws<ArgumentOutOfRangeException>(() => s.MaxCrawlDepth = -1);
+                }),
+
+                Case.Sync(Id, "MaxRedirects_Bounds_Accepted", "MaxRedirects accepts 1 and 50", () =>
+                {
+                    CrawlSettings s = new CrawlSettings();
+                    s.MaxRedirects = 1;
+                    Check.Equal(1, s.MaxRedirects);
+                    s.MaxRedirects = 50;
+                    Check.Equal(50, s.MaxRedirects);
+                }),
+
+                Case.Sync(Id, "MaxRedirects_OutOfRange_Throws", "MaxRedirects rejects 0, negatives and values above 50", () =>
+                {
+                    CrawlSettings s = new CrawlSettings();
+                    Check.Throws<ArgumentOutOfRangeException>(() => s.MaxRedirects = 0);
+                    Check.Throws<ArgumentOutOfRangeException>(() => s.MaxRedirects = -1);
+                    Check.Throws<ArgumentOutOfRangeException>(() => s.MaxRedirects = 51);
+                    Check.Equal(10, s.MaxRedirects);
                 }),
 
                 Case.Sync(Id, "MaxParallelTasks_Valid", "MaxParallelTasks accepts a positive value", () =>

@@ -2,6 +2,7 @@ namespace Test.Shared.Suites
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -174,6 +175,149 @@ namespace Test.Shared.Suites
                     Check.Equal("application/pdf", resource.ContentType);
                     Check.BytesEqual(pdfBytes, resource.Data);
                     Check.StartsWith("%PDF-1.7", Encoding.ASCII.GetString(resource.Data));
+                }),
+
+                Headless("Redirect_Loop_Reported", "A looping page is reported as LoopDetected instead of disappearing", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    server.AddRedirect("/loop-a", "/loop-b", 302);
+                    server.AddRedirect("/loop-b", "/loop-a", 302);
+
+                    Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/loop-a"), headless: true);
+                    WebResource resource = await CrawlHelper.CrawlSingleWithinAsync(settings, 60, ct);
+
+                    Check.Equal(RedirectOutcomeEnum.LoopDetected, resource.RedirectOutcome);
+                    Check.Equal(server.UrlFor("/loop-a"), resource.Url);
+                }),
+
+                Headless("Redirect_FinalUrlRecorded", "A redirected page is rendered from its final URL and the chain is recorded", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    server.AddRedirect("/start", "/final", 302);
+                    server.AddHtml("/final", "<!DOCTYPE html><html><body><div id='content'>server</div>" +
+                        "<script>document.getElementById('content').textContent='rendered-final';</script></body></html>");
+
+                    Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/start"), headless: true);
+                    WebResource resource = await CrawlHelper.CrawlSingleWithinAsync(settings, 60, ct);
+
+                    Check.Equal(200, resource.Status);
+                    Check.Equal(server.UrlFor("/start"), resource.Url);
+                    Check.Equal(server.UrlFor("/final"), resource.FinalUrl);
+                    Check.Equal(RedirectOutcomeEnum.Followed, resource.RedirectOutcome);
+                    Check.Count(1, resource.RedirectChain);
+                    Check.Contains("rendered-final", Encoding.UTF8.GetString(resource.Data));
+                }),
+
+                Headless("Redirect_BrowserSideHopRecorded", "A redirect the browser follows itself (GET differs from HEAD) is recorded", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    server.AddHandler("/split", context => context.Request.HttpMethod == "HEAD"
+                        ? new FixtureResponse { StatusCode = 200, ContentType = "text/html; charset=utf-8" }
+                        : new FixtureResponse
+                        {
+                            StatusCode = 302,
+                            ContentType = "text/plain; charset=utf-8",
+                            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "Location", "/split-final" } }
+                        });
+                    server.AddHtml("/split-final", "<!DOCTYPE html><html><body>split-final</body></html>");
+
+                    Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/split"), headless: true);
+                    WebResource resource = await CrawlHelper.CrawlSingleWithinAsync(settings, 60, ct);
+
+                    Check.Equal(200, resource.Status);
+                    Check.Equal(server.UrlFor("/split-final"), resource.FinalUrl);
+                    Check.Equal(RedirectOutcomeEnum.Followed, resource.RedirectOutcome);
+                    Check.Contains("split-final", Encoding.UTF8.GetString(resource.Data));
+                }),
+
+                Headless("Auth_Basic_SameOrigin_Sent", "Basic credentials reach a same-origin page and its same-origin subresources", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    string expected = "Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes("user:pass"));
+                    server.AddHandler("/secure", context => context.Request.Headers["Authorization"] == expected
+                        ? new FixtureResponse
+                        {
+                            StatusCode = 200,
+                            ContentType = "text/html; charset=utf-8",
+                            Body = Encoding.UTF8.GetBytes("<!DOCTYPE html><html><body>granted<script src='/app.js'></script></body></html>")
+                        }
+                        : new FixtureResponse { StatusCode = 401, ContentType = "text/plain", Body = Encoding.UTF8.GetBytes("unauthorized") });
+                    server.AddResponse("/app.js", "application/javascript", Encoding.UTF8.GetBytes("document.body.setAttribute('data-app','1');"));
+
+                    Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/secure"), headless: true);
+                    settings.Authentication = new AuthenticationSettings { Type = AuthenticationTypeEnum.Basic, Username = "user", Password = "pass" };
+
+                    WebResource resource = await CrawlHelper.CrawlSingleWithinAsync(settings, 60, ct);
+
+                    Check.Equal(200, resource.Status);
+                    Check.Contains("granted", Encoding.UTF8.GetString(resource.Data));
+                    Check.Contains("data-app=\"1\"", Encoding.UTF8.GetString(resource.Data), "The page should have been rendered by the browser.");
+                    Check.True(server.Requests("/app.js").Count > 0, "The browser should have loaded the same-origin script.");
+                    Check.True(server.Requests("/secure").TrueForAll(r => r.Headers["Authorization"] == expected), "Every /secure request should carry credentials.");
+                    Check.True(server.Requests("/app.js").TrueForAll(r => r.Headers["Authorization"] == expected), "Same-origin subresources should carry credentials.");
+                }),
+
+                Headless("Auth_BrowserSideRedirect_KeepsCredentials", "A same-origin redirect the browser follows itself still carries credentials", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    string expected = "Bearer secret-token";
+                    server.AddHandler("/split", context =>
+                    {
+                        if (context.Request.Headers["Authorization"] != expected)
+                            return new FixtureResponse { StatusCode = 401, ContentType = "text/plain", Body = Encoding.UTF8.GetBytes("unauthorized") };
+                        if (context.Request.HttpMethod == "HEAD")
+                            return new FixtureResponse { StatusCode = 200, ContentType = "text/html; charset=utf-8" };
+                        return new FixtureResponse
+                        {
+                            StatusCode = 302,
+                            ContentType = "text/plain; charset=utf-8",
+                            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "Location", "/split-final" } }
+                        };
+                    });
+                    server.AddHandler("/split-final", context => context.Request.Headers["Authorization"] == expected
+                        ? new FixtureResponse
+                        {
+                            StatusCode = 200,
+                            ContentType = "text/html; charset=utf-8",
+                            Body = Encoding.UTF8.GetBytes("<!DOCTYPE html><html><body><div id='c'>server</div><script>document.getElementById('c').textContent='browser-rendered';</script></body></html>")
+                        }
+                        : new FixtureResponse { StatusCode = 401, ContentType = "text/plain", Body = Encoding.UTF8.GetBytes("unauthorized") });
+
+                    Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/split"), headless: true);
+                    settings.Authentication = new AuthenticationSettings { Type = AuthenticationTypeEnum.BearerToken, BearerToken = "secret-token" };
+
+                    WebResource resource = await CrawlHelper.CrawlSingleWithinAsync(settings, 60, ct);
+
+                    Check.Equal(200, resource.Status);
+                    Check.Equal(server.UrlFor("/split-final"), resource.FinalUrl);
+                    Check.Contains("browser-rendered", Encoding.UTF8.GetString(resource.Data));
+                    Check.True(server.Requests().TrueForAll(r => r.Headers["Authorization"] == expected), "Every request should carry the bearer token.");
+                }),
+
+                Headless("Auth_CrossOrigin_NotSent", "Credentials never reach another origin, by redirect or by subresource", async ct =>
+                {
+                    using FixtureServer origin = new FixtureServer();
+                    using FixtureServer other = new FixtureServer();
+                    origin.AddHtml("/page", "<!DOCTYPE html><html><body>page<img src='" + other.UrlFor("/pixel.gif") + "'></body></html>");
+                    origin.AddRedirect("/start", other.UrlFor("/target"), 302);
+                    other.AddResponse("/pixel.gif", "image/gif", new byte[] { 0x47, 0x49, 0x46, 0x38, 0x39, 0x61 });
+                    other.AddHtml("/target", "<!DOCTYPE html><html><body>other origin</body></html>");
+
+                    AuthenticationSettings auth = new AuthenticationSettings { Type = AuthenticationTypeEnum.ApiKey, ApiKeyHeader = "x-api-key", ApiKey = "abc123" };
+
+                    Settings pageSettings = CrawlHelper.CreateSettings(origin.UrlFor("/page"), headless: true);
+                    pageSettings.Authentication = auth;
+                    await CrawlHelper.CrawlSingleWithinAsync(pageSettings, 60, ct);
+
+                    Settings redirectSettings = CrawlHelper.CreateSettings(origin.UrlFor("/start"), headless: true);
+                    redirectSettings.Authentication = auth;
+                    WebResource redirected = await CrawlHelper.CrawlSingleWithinAsync(redirectSettings, 60, ct);
+
+                    Check.Equal(other.UrlFor("/target"), redirected.FinalUrl);
+                    Check.True(origin.Requests("/page").TrueForAll(r => r.Headers["x-api-key"] == "abc123"), "The start origin should receive the key.");
+                    Check.True(other.Requests("/pixel.gif").Count > 0, "The browser should have loaded the cross-origin image.");
+                    Check.True(other.Requests("/target").Count > 0, "The redirect target on the other origin should have been requested.");
+                    Check.True(other.Requests().TrueForAll(r => r.Headers["x-api-key"] == null), "The other origin must never receive the key.");
                 }),
             };
 

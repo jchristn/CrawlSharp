@@ -123,6 +123,7 @@ export function buildSettingsPayload(config) {
       IncludeSitemap: config.includeSitemap !== false,
       FollowLinks: config.followLinks !== false,
       FollowRedirects: config.followRedirects !== false,
+      MaxRedirects: parseIntSetting(config.maxRedirects, 10),
       RestrictToChildUrls: config.restrictToChildUrls !== false,
       RestrictToSameSubdomain: config.restrictToSameSubdomain !== false,
       RestrictToSameRootDomain: config.restrictToSameRootDomain !== false,
@@ -167,7 +168,68 @@ export function buildSettingsPayload(config) {
     } else if (config.authType === 'BearerToken') {
       settings.Authentication.BearerToken = config.authBearerToken || ''
     }
+
+    const origins = splitLines(config.authCredentialOrigins)
+    if (origins.length > 0) settings.Authentication.CredentialOrigins = origins
   }
 
   return settings
+}
+
+function splitLines(value) {
+  if (!value || !value.trim()) return []
+  return value.split('\n').map(v => v.trim()).filter(Boolean)
+}
+
+function isHttpUrl(value) {
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.hostname
+  } catch {
+    return false
+  }
+}
+
+// Mirrors AuthenticationSettings.Validate on the server, so the form can show problems before a crawl is started.
+// Returns an object keyed by config field name; an empty object means the settings are valid.
+export function validateAuthConfig(config) {
+  const errors = {}
+  const type = config.authType || 'None'
+  const blank = v => !v || !String(v).trim()
+
+  if (type === 'Basic' && blank(config.authUsername)) {
+    errors.authUsername = 'Username is required for Basic authentication.'
+  }
+
+  if (type === 'ApiKey') {
+    if (blank(config.authApiKeyHeader)) errors.authApiKeyHeader = 'Header name is required for API key authentication.'
+    if (blank(config.authApiKey)) errors.authApiKey = 'API key is required for API key authentication.'
+  }
+
+  if (type === 'BearerToken' && blank(config.authBearerToken)) {
+    errors.authBearerToken = 'Bearer token is required for bearer token authentication.'
+  }
+
+  if (type !== 'None') {
+    const invalid = splitLines(config.authCredentialOrigins).filter(o => !isHttpUrl(o))
+    if (invalid.length > 0) {
+      errors.authCredentialOrigins = 'Not an absolute http or https URL: ' + invalid.join(', ')
+    }
+  }
+
+  return errors
+}
+
+// RedirectOutcome arrives as a string from the server; accept the numeric form too.
+const REDIRECT_OUTCOMES = ['None', 'Followed', 'NotFollowed', 'LoopDetected', 'MaxRedirectsExceeded', 'OutOfScope', 'RobotsDisallowed', 'MissingLocation', 'InvalidLocation']
+
+export function getRedirectOutcome(resource) {
+  const value = resource ? resource.RedirectOutcome : null
+  if (typeof value === 'number') return REDIRECT_OUTCOMES[value] || 'None'
+  return value || 'None'
+}
+
+// Outcomes that mean the crawler stopped on a problem redirect; None, Followed and NotFollowed are ordinary.
+export function isRedirectProblem(outcome) {
+  return !['None', 'Followed', 'NotFollowed'].includes(outcome)
 }

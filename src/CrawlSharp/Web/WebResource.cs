@@ -18,9 +18,39 @@
         #region Public-Members
 
         /// <summary>
-        /// URL of the web resource.
+        /// URL that was requested.  When the request was redirected, this is still the original address; see <see cref="FinalUrl"/>.
         /// </summary>
         public string Url { get; set; } = null;
+
+        /// <summary>
+        /// URL of the response whose body is in <see cref="Data"/>.
+        /// Equals <see cref="Url"/> when there was no redirect.  Default is null.
+        /// </summary>
+        public string FinalUrl { get; set; } = null;
+
+        /// <summary>
+        /// Redirects received while retrieving the resource, in order.  Empty when there was no redirect.
+        /// Never null; assigning null results in an empty list.
+        /// </summary>
+        public List<RedirectHop> RedirectChain
+        {
+            get
+            {
+                return _RedirectChain;
+            }
+            set
+            {
+                if (value == null) value = new List<RedirectHop>();
+                _RedirectChain = value;
+            }
+        }
+
+        /// <summary>
+        /// Why the crawler stopped following redirects for this resource.  Default is None.
+        /// When the value is anything other than None or Followed, <see cref="Status"/> and <see cref="Data"/> come from the last redirect
+        /// response received (normally a 3xx), not from page content.
+        /// </summary>
+        public RedirectOutcomeEnum RedirectOutcome { get; set; } = RedirectOutcomeEnum.None;
 
         /// <summary>
         /// Parent URL.
@@ -173,6 +203,7 @@
 
         private int _Depth = 0;
         private int _Status = 0;
+        private List<RedirectHop> _RedirectChain = new List<RedirectHop>();
         private NameValueCollection _Headers = new NameValueCollection(StringComparer.InvariantCultureIgnoreCase);
 
         private string[] _LastModifiedFormats = new[]

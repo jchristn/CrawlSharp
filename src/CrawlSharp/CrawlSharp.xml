@@ -120,42 +120,63 @@
         <member name="T:CrawlSharp.Web.AuthenticationSettings">
             <summary>
             Authentication settings.
+            Credentials are sent only to origins in the credential scope: the origin of <see cref="P:CrawlSharp.Web.CrawlSettings.StartUrl"/>,
+            its HTTPS upgrade when the start URL is plain HTTP, and any origins listed in <see cref="P:CrawlSharp.Web.AuthenticationSettings.CredentialOrigins"/>.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.AuthenticationSettings.Type">
             <summary>
-            Authentication type.
+            Authentication type.  Default is None.
+            When None, every credential field must be empty; <see cref="M:CrawlSharp.Web.AuthenticationSettings.Validate"/> throws otherwise.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.AuthenticationSettings.Username">
             <summary>
-            Username for basic authentication.
+            Username for basic authentication.  Required when <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/> is Basic.  Default is null.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.AuthenticationSettings.Password">
             <summary>
-            Password for basic authentication.
+            Password for basic authentication.  Optional when <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/> is Basic.  Default is null.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.AuthenticationSettings.ApiKeyHeader">
             <summary>
-            Header to use for attaching an API key to the request.
+            Header to use for attaching an API key to the request.  Required when <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/> is ApiKey.  Default is null.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.AuthenticationSettings.ApiKey">
             <summary>
-            API key to attach.
+            API key to attach.  Required when <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/> is ApiKey.  Default is null.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.AuthenticationSettings.BearerToken">
             <summary>
-            Bearer token to use in the authorization header.
+            Bearer token to use in the authorization header.  Required when <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/> is BearerToken.  Default is null.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.AuthenticationSettings.CredentialOrigins">
+            <summary>
+            Additional origins that receive credentials, for sites that span more than one origin.
+            Each entry must be an absolute http or https URL; only its scheme, host and port are used, for example "https://docs.example.com".
+            Default is an empty list.  Assigning null results in an empty list.
             </summary>
         </member>
         <member name="M:CrawlSharp.Web.AuthenticationSettings.#ctor">
             <summary>
             Authentication settings.
             </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.AuthenticationSettings.Validate">
+            <summary>
+            Check that the settings are complete and unambiguous.
+            Called by the <see cref="T:CrawlSharp.Web.WebCrawler"/> constructor, so a bad configuration fails before a crawl starts.
+            Empty or whitespace strings count as unset.
+            </summary>
+            <exception cref="T:System.ArgumentException">
+            Thrown when <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/> is None but a credential field is set; when the fields required by <see cref="P:CrawlSharp.Web.AuthenticationSettings.Type"/>
+            are missing; or when a <see cref="P:CrawlSharp.Web.AuthenticationSettings.CredentialOrigins"/> entry is not an absolute http or https URL.
+            </exception>
         </member>
         <member name="T:CrawlSharp.Web.AuthenticationTypeEnum">
             <summary>
@@ -316,8 +337,22 @@
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.FollowRedirects">
             <summary>
-            Boolean specifying whether or not redirects should be followed.
+            Boolean specifying whether or not redirects should be followed.  Default is true.
+            When true, the crawler follows redirects itself, one hop at a time: it stops after <see cref="P:CrawlSharp.Web.CrawlSettings.MaxRedirects"/> hops or when the
+            chain returns to a URL it already requested, checks each target against robots.txt and (when <see cref="P:CrawlSharp.Web.CrawlSettings.FollowLinks"/> is true)
+            the crawl scope, pauses <see cref="P:CrawlSharp.Web.CrawlSettings.RequestDelayMs"/> before each hop, and attaches credentials only to origins in the credential scope.
+            When false, the first redirect response is returned as the result, with its Location header in <see cref="P:CrawlSharp.Web.WebResource.Headers"/>,
+            and the target is neither requested nor queued.
+            See <see cref="P:CrawlSharp.Web.WebResource.RedirectOutcome"/> for why a chain stopped.
             </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.CrawlSettings.MaxRedirects">
+            <summary>
+            Maximum number of redirects to follow for a single resource.
+            Default is 10.  Minimum is 1 and maximum is 50; values outside that range throw.  To follow no redirects, set <see cref="P:CrawlSharp.Web.CrawlSettings.FollowRedirects"/> to false.
+            A longer chain ends with <see cref="P:CrawlSharp.Web.WebResource.RedirectOutcome"/> set to MaxRedirectsExceeded, and the hop past the limit is not requested.
+            </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown when the value is below 1 or above 50.</exception>
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.RestrictToChildUrls">
             <summary>
@@ -377,8 +412,12 @@
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.ThrottleMs">
             <summary>
-            The number of milliseconds to delay when receiving a 429 response.
+            One pause, in milliseconds, taken after a 429 (Too Many Requests) response just before that 429 is returned as the result.
+            It applies only when <see cref="P:CrawlSharp.Web.CrawlSettings.RetryOn429"/> is false or its <see cref="P:CrawlSharp.Web.CrawlSettings.MaxRetries"/> are used up; it does not pace normal requests
+            (see <see cref="P:CrawlSharp.Web.CrawlSettings.RequestDelayMs"/> for that).
+            Default is 5000.  Minimum is 0; negative values throw.
             </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown when the value is negative.</exception>
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.RetryOn429">
             <summary>
@@ -412,8 +451,10 @@
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.RequestDelayMs">
             <summary>
-            The number of milliseconds to delay between each HTTP request.
-            Default is 2500.
+            Pause, in milliseconds, before every request: pages, robots.txt, sitemap.xml and each redirect hop.
+            The pause is taken per parallel task, so with <see cref="P:CrawlSharp.Web.CrawlSettings.MaxParallelTasks"/> set to 8, up to eight requests can start per interval.
+            A Crawl-delay in robots.txt replaces this value entirely, whether higher or lower; <see cref="P:CrawlSharp.Web.WebCrawler.Delay"/> exposes the value in effect.
+            Default is 2500.  Minimum is 0; negative values are set to 0.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.CrawlSettings.AutoExpandCollapsibles">
@@ -479,6 +520,213 @@
         <member name="M:CrawlSharp.Web.QueuedLink.#ctor">
             <summary>
             Queued link.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.RedirectHop">
+            <summary>
+            One redirect received while retrieving a resource.
+            Instances are not thread-safe; each <see cref="T:CrawlSharp.Web.WebResource"/> owns its own list of hops.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RedirectHop.Url">
+            <summary>
+            URL that returned the redirect response.
+            Default is null.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RedirectHop.Status">
+            <summary>
+            HTTP status code of the redirect response, for example 301 or 302.
+            Default is 0.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.RedirectHop.Location">
+            <summary>
+            Redirect target: the absolute URL resolved from the Location header, or the raw header value when it could not be resolved.
+            Default is null.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectHop.#ctor">
+            <summary>
+            Instantiate an empty hop.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectHop.#ctor(System.String,System.Int32,System.String)">
+            <summary>
+            Instantiate a hop.
+            </summary>
+            <param name="url">URL that returned the redirect response.</param>
+            <param name="status">HTTP status code of the redirect response.</param>
+            <param name="location">Resolved redirect target, or the raw Location header value.</param>
+        </member>
+        <member name="T:CrawlSharp.Web.RedirectOutcomeEnum">
+            <summary>
+            Why the crawler stopped following the redirect chain for a resource.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.None">
+            <summary>
+            The first response was not a redirect.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.Followed">
+            <summary>
+            One or more redirects were followed and the chain ended in a response that is not a redirect.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.NotFollowed">
+            <summary>
+            The first response was a redirect and <see cref="P:CrawlSharp.Web.CrawlSettings.FollowRedirects"/> is false, so it was not followed.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.LoopDetected">
+            <summary>
+            The chain returned to a URL it had already requested, with the same cookies, so following it would repeat forever.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.MaxRedirectsExceeded">
+            <summary>
+            The chain was longer than <see cref="P:CrawlSharp.Web.CrawlSettings.MaxRedirects"/>.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.OutOfScope">
+            <summary>
+            The redirect target is outside the crawl scope (domain, child URL, external link or exclusion rules), so it was not requested.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.RobotsDisallowed">
+            <summary>
+            The redirect target is disallowed by robots.txt, so it was not requested.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.MissingLocation">
+            <summary>
+            The redirect response carried no Location header.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Web.RedirectOutcomeEnum.InvalidLocation">
+            <summary>
+            The redirect response carried a Location header that is not a valid http or https URL.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Web.RedirectPolicy">
+            <summary>
+            Stateless rules the crawler uses when following redirects: which statuses are redirects, which HTTP method
+            the next request uses, how a Location header is resolved, and how origins are compared.
+            All members are static and hold no state, so they are safe to call from multiple threads.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectPolicy.IsRedirectStatus(System.Int32,System.Boolean)">
+            <summary>
+            Determine whether a response status is a redirect the crawler can follow.
+            301, 302, 303, 307 and 308 are redirects; 300 is treated as a redirect only when it carries a Location header.
+            304, 305, 306 and every other status are not redirects.
+            </summary>
+            <param name="status">HTTP status code.</param>
+            <param name="hasLocation">True if the response carried a non-empty Location header.</param>
+            <returns>True if the status is a redirect.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectPolicy.GetRedirectMethod(System.Net.Http.HttpMethod,System.Int32)">
+            <summary>
+            Determine the HTTP method for the request that follows a redirect.
+            300, 301 and 302 change POST to GET and keep any other method; 303 changes everything except HEAD to GET;
+            307 and 308 keep the original method.  Statuses that are not redirects keep the original method.
+            </summary>
+            <param name="method">Method of the request that received the redirect.</param>
+            <param name="status">HTTP status code of the redirect response.</param>
+            <returns>Method to use for the next request.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when method is null.</exception>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectPolicy.ResolveLocation(System.Uri,System.String)">
+            <summary>
+            Resolve a Location header value against the URL that returned it, following RFC 3986 reference resolution.
+            Relative references such as "b", "../b", "/b", "?q=1" and "//host/b" are supported.  The fragment is removed.
+            </summary>
+            <param name="current">Absolute URL that returned the redirect.</param>
+            <param name="location">Location header value.</param>
+            <returns>Absolute http or https URL, or null if the value is empty, cannot be parsed, or uses another scheme.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when current is null.</exception>
+            <exception cref="T:System.ArgumentException">Thrown when current is not an absolute URL.</exception>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectPolicy.GetOrigin(System.Uri)">
+            <summary>
+            Build the origin (scheme, host and port) of an absolute URL, for example "https://example.com:443".
+            Scheme and host are lower-cased and the port is always explicit, so "http://h" and "http://h:80" have the same origin.
+            </summary>
+            <param name="uri">Absolute URL.</param>
+            <returns>Origin string.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when uri is null.</exception>
+            <exception cref="T:System.ArgumentException">Thrown when uri is not absolute.</exception>
+        </member>
+        <member name="M:CrawlSharp.Web.RedirectPolicy.IsSameOrigin(System.Uri,System.Uri)">
+            <summary>
+            Determine whether two absolute URLs share an origin (scheme, host and port).
+            </summary>
+            <param name="a">First URL.</param>
+            <param name="b">Second URL.</param>
+            <returns>True if the origins match.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when either URL is null.</exception>
+        </member>
+        <member name="T:CrawlSharp.Web.ResolvedResponse">
+            <summary>
+            Result of following one requested URL through its redirect chain.
+            Produced and consumed by <see cref="T:CrawlSharp.Web.WebCrawler"/> on a single task; not thread-safe.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.RequestedUri">
+            <summary>
+            URL that was requested.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.FinalUri">
+            <summary>
+            Last URL actually requested; the status, headers and body below came from it.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.RequestedUris">
+            <summary>
+            Every URL actually requested for this chain, in order, including <see cref="P:CrawlSharp.Web.ResolvedResponse.RequestedUri"/> and <see cref="P:CrawlSharp.Web.ResolvedResponse.FinalUri"/>.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.Chain">
+            <summary>
+            Redirects received, in order.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.Outcome">
+            <summary>
+            Why the chain stopped.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.Status">
+            <summary>
+            HTTP status code of the last response.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.Headers">
+            <summary>
+            Headers of the last response.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.MediaType">
+            <summary>
+            Media type from the last response's Content-Type header, lower-cased, or null when the header was absent.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.ETag">
+            <summary>
+            ETag of the last response, without quotes or the weak prefix.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.Data">
+            <summary>
+            Body of the last response; null for HEAD requests and empty bodies.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.ResolvedResponse.AliasOf">
+            <summary>
+            Set when a redirect target had already been retrieved by another path.  The target was not requested again,
+            and this is the resource already retrieved for it.
             </summary>
         </member>
         <member name="T:CrawlSharp.Web.RobotsFile">
@@ -830,6 +1078,8 @@
             </summary>
             <param name="settings">Settings.</param>
             <param name="token">Cancellation token.</param>
+            <exception cref="T:System.ArgumentNullException">Thrown when settings is null.</exception>
+            <exception cref="T:System.ArgumentException">Thrown when the authentication settings are incomplete or ambiguous; see <see cref="M:CrawlSharp.Web.AuthenticationSettings.Validate"/>.</exception>
         </member>
         <member name="M:CrawlSharp.Web.WebCrawler.Dispose(System.Boolean)">
             <summary>
@@ -855,6 +1105,45 @@
             <param name="token">Cancellation token.</param>
             <returns>Enumerable of WebResource objects.</returns>
         </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.ResolveAsync(System.Uri,System.Net.Http.HttpMethod,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            Request a URL and follow its redirect chain one hop at a time.  The HTTP stack never follows redirects on its own,
+            so this loop decides every hop: the limit, loop detection, crawl scope, robots.txt, pacing and which requests carry credentials.
+            </summary>
+            <param name="requestUri">URL to request.</param>
+            <param name="method">GET, or HEAD for the headless content-type check.</param>
+            <param name="sameHostOnly">True for robots.txt and sitemap.xml, whose redirects are followed only on the start URL's host.</param>
+            <param name="token">Cancellation token.</param>
+            <returns>The last response received and why the chain stopped.</returns>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.SendHopAsync(System.Net.Http.HttpClient,System.Uri,System.Net.Http.HttpMethod,CrawlSharp.Web.ResolvedResponse,System.Threading.CancellationToken)">
+            <summary>
+            Send one request, retrying on 429 as configured, and record the response on the result.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.RegisterVisited(System.Uri,System.Collections.Generic.IEnumerable{System.Uri},System.Uri,CrawlSharp.Web.WebResource)">
+            <summary>
+            Record the requested URL, every URL requested along its chain and the final URL as visited, all pointing at one resource,
+            so a later link to any of them does not replay the chain.  When the final URL was already retrieved by another path,
+            the existing resource wins and is returned instead, which keeps a page reached twice from being yielded twice.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.RouteWithCredentials(Microsoft.Playwright.IRoute,System.Action)">
+            <summary>
+            Attach credentials to browser requests whose origin is in the credential scope.  The request is fetched without
+            following redirects and its response handed to the browser.  route.ContinueAsync with headers is not used, because
+            Playwright carries those headers onto every redirect the request starts, including cross-origin ones.
+            Playwright does not route the requests a redirect starts, so the browser would follow a redirect without credentials.
+            For a subresource that is the safe direction and is accepted.  A redirected navigation is aborted instead, and
+            <paramref name="onNavigationRedirect"/> tells the caller to resolve the chain itself and navigate to where it ends.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.IsInCrawlScope(System.String,System.String@)">
+            <summary>
+            Apply the crawl-scope filters (denied domains, same root domain, same subdomain, child URLs, allowed domains,
+            external links and exclusion patterns) to an absolute URL.  Used for discovered links and for redirect targets.
+            </summary>
+        </member>
         <member name="T:CrawlSharp.Web.WebResource">
             <summary>
             Web resource, an item identified during a crawl.
@@ -862,7 +1151,26 @@
         </member>
         <member name="P:CrawlSharp.Web.WebResource.Url">
             <summary>
-            URL of the web resource.
+            URL that was requested.  When the request was redirected, this is still the original address; see <see cref="P:CrawlSharp.Web.WebResource.FinalUrl"/>.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.FinalUrl">
+            <summary>
+            URL of the response whose body is in <see cref="P:CrawlSharp.Web.WebResource.Data"/>.
+            Equals <see cref="P:CrawlSharp.Web.WebResource.Url"/> when there was no redirect.  Default is null.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.RedirectChain">
+            <summary>
+            Redirects received while retrieving the resource, in order.  Empty when there was no redirect.
+            Never null; assigning null results in an empty list.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Web.WebResource.RedirectOutcome">
+            <summary>
+            Why the crawler stopped following redirects for this resource.  Default is None.
+            When the value is anything other than None or Followed, <see cref="P:CrawlSharp.Web.WebResource.Status"/> and <see cref="P:CrawlSharp.Web.WebResource.Data"/> come from the last redirect
+            response received (normally a 3xx), not from page content.
             </summary>
         </member>
         <member name="P:CrawlSharp.Web.WebResource.ParentUrl">

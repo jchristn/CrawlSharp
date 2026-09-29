@@ -1,9 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
-
 namespace CrawlSharp.Web
 {
+    using System;
+    using System.Collections.Generic;
+    using System.Text.RegularExpressions;
+
     /// <summary>
     /// Crawl settings.
     /// </summary>
@@ -68,9 +68,34 @@ namespace CrawlSharp.Web
         public bool FollowLinks { get; set; } = true;
         
         /// <summary>
-        /// Boolean specifying whether or not redirects should be followed.
+        /// Boolean specifying whether or not redirects should be followed.  Default is true.
+        /// When true, the crawler follows redirects itself, one hop at a time: it stops after <see cref="MaxRedirects"/> hops or when the
+        /// chain returns to a URL it already requested, checks each target against robots.txt and (when <see cref="FollowLinks"/> is true)
+        /// the crawl scope, pauses <see cref="RequestDelayMs"/> before each hop, and attaches credentials only to origins in the credential scope.
+        /// When false, the first redirect response is returned as the result, with its Location header in <see cref="WebResource.Headers"/>,
+        /// and the target is neither requested nor queued.
+        /// See <see cref="WebResource.RedirectOutcome"/> for why a chain stopped.
         /// </summary>
         public bool FollowRedirects { get; set; } = true;
+
+        /// <summary>
+        /// Maximum number of redirects to follow for a single resource.
+        /// Default is 10.  Minimum is 1 and maximum is 50; values outside that range throw.  To follow no redirects, set <see cref="FollowRedirects"/> to false.
+        /// A longer chain ends with <see cref="WebResource.RedirectOutcome"/> set to MaxRedirectsExceeded, and the hop past the limit is not requested.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is below 1 or above 50.</exception>
+        public int MaxRedirects
+        {
+            get
+            {
+                return _MaxRedirects;
+            }
+            set
+            {
+                if (value < 1 || value > 50) throw new ArgumentOutOfRangeException(nameof(MaxRedirects), "MaxRedirects must be between 1 and 50.");
+                _MaxRedirects = value;
+            }
+        }
 
         /// <summary>
         /// Boolean indicating if only links that are child URLs to the entry URL should be followed.
@@ -195,8 +220,12 @@ namespace CrawlSharp.Web
         }
 
         /// <summary>
-        /// The number of milliseconds to delay when receiving a 429 response.
+        /// One pause, in milliseconds, taken after a 429 (Too Many Requests) response just before that 429 is returned as the result.
+        /// It applies only when <see cref="RetryOn429"/> is false or its <see cref="MaxRetries"/> are used up; it does not pace normal requests
+        /// (see <see cref="RequestDelayMs"/> for that).
+        /// Default is 5000.  Minimum is 0; negative values throw.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is negative.</exception>
         public int ThrottleMs
         {
             get
@@ -274,8 +303,10 @@ namespace CrawlSharp.Web
         public bool RetryBackoffJitter { get; set; } = true;
 
         /// <summary>
-        /// The number of milliseconds to delay between each HTTP request.
-        /// Default is 2500.
+        /// Pause, in milliseconds, before every request: pages, robots.txt, sitemap.xml and each redirect hop.
+        /// The pause is taken per parallel task, so with <see cref="MaxParallelTasks"/> set to 8, up to eight requests can start per interval.
+        /// A Crawl-delay in robots.txt replaces this value entirely, whether higher or lower; <see cref="WebCrawler.Delay"/> exposes the value in effect.
+        /// Default is 2500.  Minimum is 0; negative values are set to 0.
         /// </summary>
         public int RequestDelayMs
         {
@@ -378,6 +409,7 @@ namespace CrawlSharp.Web
         private List<string> _AllowedDomains = new List<string>();
         private List<string> _DeniedDomains = new List<string>();
         private int _MaxCrawlDepth = 5;
+        private int _MaxRedirects = 10;
         private List<Regex> _ExcludeLinkPatterns = new List<Regex>();
         private int _MaxParallelTasks = 8;
         private int _PageTimeoutMs = 30000;

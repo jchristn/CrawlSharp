@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { formatBytes, getStatusClass, classifyContentType } from '../utils/api.js'
+import { formatBytes, getStatusClass, classifyContentType, getRedirectOutcome, isRedirectProblem } from '../utils/api.js'
 import { getCrawlById, getCrawlResources } from '../utils/store.js'
 
 export default function CrawlResultsView({ serverUrl }) {
@@ -29,7 +29,8 @@ export default function CrawlResultsView({ serverUrl }) {
   if (!crawl) return null
 
   const filtered = resources.filter(r => {
-    const matchesText = !filter || r.Url.toLowerCase().includes(filter.toLowerCase())
+    const needle = filter.toLowerCase()
+    const matchesText = !filter || r.Url.toLowerCase().includes(needle) || (r.FinalUrl || '').toLowerCase().includes(needle)
     const matchesStatus = statusFilter === 'all' || getStatusBucket(r.Status) === statusFilter
     const matchesType = typeFilter === 'all' || classifyContentType(r.ContentType) === typeFilter
     return matchesText && matchesStatus && matchesType
@@ -199,7 +200,15 @@ export default function CrawlResultsView({ serverUrl }) {
                         {r.Status}
                       </span>
                     </td>
-                    <td className="mono truncate" style={{ maxWidth: 400 }} title={r.Url}>{r.Url}</td>
+                    <td className="mono truncate" style={{ maxWidth: 400 }} title={r.FinalUrl && r.FinalUrl !== r.Url ? `${r.Url}\n-> ${r.FinalUrl}` : r.Url}>
+                      {r.Url}
+                      {isRedirectProblem(getRedirectOutcome(r)) && (
+                        <span className="badge badge-warning" style={{ marginLeft: 8 }}>{getRedirectOutcome(r)}</span>
+                      )}
+                      {r.FinalUrl && r.FinalUrl !== r.Url && (
+                        <span className="url-final truncate">&rarr; {r.FinalUrl}</span>
+                      )}
+                    </td>
                     <td className="text-muted text-sm">{classifyContentType(r.ContentType)}</td>
                     <td className="text-muted">{formatBytes(r.ContentLength)}</td>
                     <td className="text-muted">{r.Depth}</td>
@@ -350,6 +359,18 @@ export default function CrawlResultsView({ serverUrl }) {
                   <label>URL</label>
                   <div className="mono text-sm" style={{ wordBreak: 'break-all' }}>{selectedResource.Url}</div>
                 </div>
+                {selectedResource.FinalUrl && selectedResource.FinalUrl !== selectedResource.Url && (
+                  <div className="form-group">
+                    <label>Final URL</label>
+                    <div className="mono text-sm" style={{ wordBreak: 'break-all' }}>{selectedResource.FinalUrl}</div>
+                  </div>
+                )}
+                <div className="form-group">
+                  <label>Redirect Outcome</label>
+                  <span className={`badge ${isRedirectProblem(getRedirectOutcome(selectedResource)) ? 'badge-warning' : 'badge-neutral'}`}>
+                    {getRedirectOutcome(selectedResource)}
+                  </span>
+                </div>
                 <div className="form-group">
                   <label>Parent URL</label>
                   <div className="mono text-sm" style={{ wordBreak: 'break-all' }}>{selectedResource.ParentUrl || '-'}</div>
@@ -391,6 +412,16 @@ export default function CrawlResultsView({ serverUrl }) {
                   {selectedResource.MD5Hash && <div><strong>MD5:</strong> {selectedResource.MD5Hash}</div>}
                   {selectedResource.SHA1Hash && <div><strong>SHA1:</strong> {selectedResource.SHA1Hash}</div>}
                   {selectedResource.SHA256Hash && <div><strong>SHA256:</strong> {selectedResource.SHA256Hash}</div>}
+                </div>
+              </div>
+            )}
+            {selectedResource.RedirectChain && selectedResource.RedirectChain.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, display: 'block' }}>Redirect Chain</label>
+                <div style={{ background: 'var(--code-bg)', padding: 12, borderRadius: 8, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {selectedResource.RedirectChain.map((hop, i) => (
+                    <div key={i}><strong>{hop.Status}</strong> {hop.Url} &rarr; {hop.Location}</div>
+                  ))}
                 </div>
               </div>
             )}

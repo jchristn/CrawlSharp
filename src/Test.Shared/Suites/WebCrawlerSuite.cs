@@ -200,8 +200,7 @@ namespace Test.Shared.Suites
 
                 Case.Async(Id, "Redirect_ReturnsFinalContent", "A redirect resolves to the final page content", async ct =>
                 {
-                    // The underlying HTTP client transparently follows redirects, so the crawler
-                    // returns the final page (status 200) for the requested URL.
+                    // The crawler follows the redirect itself and records where the content came from.
                     using FixtureServer server = new FixtureServer();
                     server.AddRedirect("/start", server.UrlFor("/final"), 302);
                     server.AddHtml("/final", "<html><body>final-destination</body></html>");
@@ -215,12 +214,15 @@ namespace Test.Shared.Suites
 
                     Check.Equal(200, resource.Status);
                     Check.Contains("final-destination", Encoding.UTF8.GetString(resource.Data));
+                    Check.Equal(server.UrlFor("/start"), resource.Url);
+                    Check.Equal(server.UrlFor("/final"), resource.FinalUrl);
+                    Check.Equal(RedirectOutcomeEnum.Followed, resource.RedirectOutcome);
+                    Check.Count(1, resource.RedirectChain);
                 }),
 
-                Case.Async(Id, "Redirect_HttpStackFollowsRegardlessOfSetting", "The HTTP stack follows redirects even when FollowRedirects is disabled", async ct =>
+                Case.Async(Id, "Redirect_NotFollowedWhenDisabled", "FollowRedirects false returns the redirect response and leaves the target alone", async ct =>
                 {
-                    // FollowRedirects governs the crawler's own 3xx handling, but the HTTP client still
-                    // resolves redirects itself, so the final content is returned either way.
+                    // Since 1.1.0 the HTTP stack never follows redirects on its own, so FollowRedirects = false is literal.
                     using FixtureServer server = new FixtureServer();
                     server.AddRedirect("/start", server.UrlFor("/final"), 302);
                     server.AddHtml("/final", "<html><body>final-destination</body></html>");
@@ -232,8 +234,17 @@ namespace Test.Shared.Suites
 
                     WebResource resource = await CrawlHelper.CrawlSingleAsync(settings, ct);
 
-                    Check.Equal(200, resource.Status);
-                    Check.Contains("final-destination", Encoding.UTF8.GetString(resource.Data));
+                    Check.Equal(302, resource.Status);
+                    Check.Equal(RedirectOutcomeEnum.NotFollowed, resource.RedirectOutcome);
+                    Check.Equal(server.UrlFor("/final"), resource.Headers["Location"]);
+                    Check.Equal(0, server.RequestCount("/final"));
+                }),
+
+                Case.Sync(Id, "Ctor_InvalidAuthentication_Throws", "The constructor rejects incomplete authentication settings", () =>
+                {
+                    Settings settings = CrawlHelper.CreateSettings("http://127.0.0.1:1/");
+                    settings.Authentication = new AuthenticationSettings { Type = AuthenticationTypeEnum.Basic };
+                    Check.Throws<ArgumentException>(() => new WebCrawler(settings));
                 }),
 
                 Case.Async(Id, "RobotsDisallow_Respected", "Disallowed paths are skipped when robots.txt is honored", async ct =>

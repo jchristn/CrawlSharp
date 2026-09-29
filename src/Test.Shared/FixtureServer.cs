@@ -3,6 +3,8 @@ namespace Test.Shared
     using System;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
+    using System.Collections.Specialized;
+    using System.Linq;
     using System.Net;
     using System.Net.Sockets;
     using System.Text;
@@ -19,6 +21,7 @@ namespace Test.Shared
             new Dictionary<string, Func<HttpListenerContext, FixtureResponse>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, int> _RequestCounts =
             new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentQueue<RecordedRequest> _Requests = new ConcurrentQueue<RecordedRequest>();
         private readonly HttpListener _Listener = new HttpListener();
         private readonly CancellationTokenSource _Cts = new CancellationTokenSource();
         private readonly Task _ListenerTask;
@@ -47,6 +50,23 @@ namespace Test.Shared
         public int RequestCount(string path)
         {
             return _RequestCounts.TryGetValue(NormalizePath(path), out int count) ? count : 0;
+        }
+
+        /// <summary>
+        /// Every request received, in arrival order.
+        /// </summary>
+        public List<RecordedRequest> Requests()
+        {
+            return new List<RecordedRequest>(_Requests);
+        }
+
+        /// <summary>
+        /// Requests received for the given path, in arrival order.
+        /// </summary>
+        public List<RecordedRequest> Requests(string path)
+        {
+            string normalized = NormalizePath(path);
+            return _Requests.Where(r => String.Equals(r.Path, normalized, StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
         /// <summary>
@@ -171,6 +191,13 @@ namespace Test.Shared
         {
             string path = NormalizePath(context.Request.Url?.AbsolutePath);
             _RequestCounts.AddOrUpdate(path, 1, (_, current) => current + 1);
+            _Requests.Enqueue(new RecordedRequest
+            {
+                Path = path,
+                Query = context.Request.Url?.Query ?? String.Empty,
+                Method = context.Request.HttpMethod,
+                Headers = new NameValueCollection(context.Request.Headers)
+            });
 
             FixtureResponse response;
 
@@ -227,31 +254,5 @@ namespace Test.Shared
             if (!path.StartsWith("/")) path = "/" + path;
             return path;
         }
-    }
-
-    /// <summary>
-    /// Response returned by a <see cref="FixtureServer"/> handler.
-    /// </summary>
-    public sealed class FixtureResponse
-    {
-        /// <summary>
-        /// HTTP status code.
-        /// </summary>
-        public int StatusCode { get; set; } = 200;
-
-        /// <summary>
-        /// Content-Type header value.
-        /// </summary>
-        public string ContentType { get; set; } = "text/plain; charset=utf-8";
-
-        /// <summary>
-        /// Response body.
-        /// </summary>
-        public byte[] Body { get; set; } = Array.Empty<byte>();
-
-        /// <summary>
-        /// Additional response headers.
-        /// </summary>
-        public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }

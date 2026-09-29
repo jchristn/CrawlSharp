@@ -95,7 +95,10 @@
             {
                 string parentUrl = ".";
                 if (!String.IsNullOrEmpty(resource.ParentUrl)) parentUrl = resource.ParentUrl;
-                Console.WriteLine("[" + resource.Status.ToString("D3") + "] " + resource.Url + " (parent " + parentUrl + ")");
+                string redirect = resource.RedirectOutcome != RedirectOutcomeEnum.None
+                    ? " -> " + resource.FinalUrl + " [" + resource.RedirectOutcome + "]"
+                    : "";
+                Console.WriteLine("[" + resource.Status.ToString("D3") + "] " + resource.Url + redirect + " (parent " + parentUrl + ")");
                 bytesCrawled += resource.ContentLength;
                 resourcesCrawled++;
                 urls.Add("[" + resource.Status.ToString("D3") + "] " + resource.Url);

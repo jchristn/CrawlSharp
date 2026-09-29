@@ -46,7 +46,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://alexnogle.com\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"AutoExpandCollapsibles\": false,\r\n    \"PostLoadDelayMs\": 0,\r\n    \"PostInteractionDelayMs\": 250,\r\n    \"MaxExpansionPasses\": 2,\r\n    \"ExpansionSelectors\": [],\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://alexnogle.com\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"AutoExpandCollapsibles\": false,\r\n    \"PostLoadDelayMs\": 0,\r\n    \"PostInteractionDelayMs\": 250,\r\n    \"MaxExpansionPasses\": 2,\r\n    \"ExpansionSelectors\": [],\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"MaxRedirects\": 10,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
 					"options": {
 						"raw": {
 							"language": "json"
@@ -80,7 +80,41 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://example.com\",\r\n    \"UseHeadlessBrowser\": true,\r\n    \"AutoExpandCollapsibles\": true,\r\n    \"PostLoadDelayMs\": 500,\r\n    \"PostInteractionDelayMs\": 250,\r\n    \"MaxExpansionPasses\": 2,\r\n    \"ExpansionSelectors\": [\r\n      \".faq-toggle\"\r\n    ],\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"None\"\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"https://example.com\",\r\n    \"UseHeadlessBrowser\": true,\r\n    \"AutoExpandCollapsibles\": true,\r\n    \"PostLoadDelayMs\": 500,\r\n    \"PostInteractionDelayMs\": 250,\r\n    \"MaxExpansionPasses\": 2,\r\n    \"ExpansionSelectors\": [\r\n      \".faq-toggle\"\r\n    ],\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"MaxRedirects\": 10,\r\n    \"RestrictToChildUrls\": false,\r\n    \"RestrictToSameSubdomain\": false,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"AllowedDomains\": [],\r\n    \"DeniedDomains\": [],\r\n    \"MaxCrawlDepth\": 2,\r\n    \"ExcludeLinkPatterns\": [],\r\n    \"FollowExternalLinks\": true,\r\n    \"MaxParallelTasks\": 16,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"ThrottleMs\": 5000,\r\n    \"RetryOn429\": true,\r\n    \"MaxRetries\": 3,\r\n    \"RetryMinBackoffMs\": 1000,\r\n    \"RetryMaxBackoffMs\": 30000,\r\n    \"RetryBackoffJitter\": true,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{protocol}}{{hostname}}:{{port}}/crawl",
+					"host": [
+						"{{protocol}}{{hostname}}"
+					],
+					"port": "{{port}}",
+					"path": [
+						"crawl"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Crawl an authenticated site",
+			"request": {
+				"method": "POST",
+				"description": "Crawl a site that requires credentials. Set Authentication.Type to Basic, ApiKey or BearerToken and supply that type's fields (the values here come from the collection variables). Credentials are sent only to the start URL's origin, its HTTPS version when the start URL is plain HTTP, and any origins in CredentialOrigins; they are re-attached to same-origin redirect targets and never sent to other origins. The crawler follows redirects itself, up to MaxRedirects hops, and stops redirect loops after one pass. Incomplete authentication settings return 400 Bad Request.",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"Authentication\": {\r\n    \"Type\": \"Basic\",\r\n    \"Username\": \"{{authUsername}}\",\r\n    \"Password\": \"{{authPassword}}\",\r\n    \"CredentialOrigins\": []\r\n  },\r\n  \"Crawl\": {\r\n    \"UserAgent\": \"CrawlSharp\",\r\n    \"StartUrl\": \"{{authStartUrl}}\",\r\n    \"UseHeadlessBrowser\": false,\r\n    \"IgnoreRobotsText\": false,\r\n    \"IncludeSitemap\": true,\r\n    \"FollowLinks\": true,\r\n    \"FollowRedirects\": true,\r\n    \"MaxRedirects\": 10,\r\n    \"RestrictToChildUrls\": true,\r\n    \"RestrictToSameSubdomain\": true,\r\n    \"RestrictToSameRootDomain\": true,\r\n    \"MaxCrawlDepth\": 2,\r\n    \"FollowExternalLinks\": false,\r\n    \"MaxParallelTasks\": 4,\r\n    \"PageTimeoutMs\": 30000,\r\n    \"RequestDelayMs\": 2500\r\n  }\r\n}",
 					"options": {
 						"raw": {
 							"language": "json"
@@ -137,6 +171,21 @@
 		{
 			"key": "port",
 			"value": "8000",
+			"type": "string"
+		},
+		{
+			"key": "authStartUrl",
+			"value": "https://intranet.example.com",
+			"type": "string"
+		},
+		{
+			"key": "authUsername",
+			"value": "crawler",
+			"type": "string"
+		},
+		{
+			"key": "authPassword",
+			"value": "",
 			"type": "string"
 		}
 	]

@@ -5,6 +5,7 @@ namespace Test.Shared.Suites
     using System.Collections.Specialized;
     using System.Text;
     using CrawlSharp.Web;
+    using SerializationHelper;
     using Touchstone.Core;
 
     /// <summary>
@@ -38,6 +39,58 @@ namespace Test.Shared.Suites
                     Check.Null(r.LastModified);
                     Check.NotNull(r.Headers);
                     Check.Null(r.Data);
+                    Check.Null(r.FinalUrl);
+                    Check.NotNull(r.RedirectChain);
+                    Check.Empty(r.RedirectChain);
+                    Check.Equal(RedirectOutcomeEnum.None, r.RedirectOutcome);
+                }),
+
+                Case.Sync(Id, "RedirectChain_Null_ReplacedWithEmpty", "RedirectChain null assignment becomes an empty list", () =>
+                {
+                    WebResource r = new WebResource();
+                    r.RedirectChain = null;
+                    Check.NotNull(r.RedirectChain);
+                    Check.Empty(r.RedirectChain);
+                }),
+
+                Case.Sync(Id, "RedirectHop_Constructor", "RedirectHop stores its URL, status and location", () =>
+                {
+                    RedirectHop hop = new RedirectHop("http://a/1", 301, "http://a/2");
+                    Check.Equal("http://a/1", hop.Url);
+                    Check.Equal(301, hop.Status);
+                    Check.Equal("http://a/2", hop.Location);
+
+                    RedirectHop empty = new RedirectHop();
+                    Check.Null(empty.Url);
+                    Check.Equal(0, empty.Status);
+                    Check.Null(empty.Location);
+                }),
+
+                Case.Sync(Id, "Json_RoundTrip_RedirectFields", "FinalUrl, RedirectChain and RedirectOutcome survive a JSON round trip", () =>
+                {
+                    Serializer serializer = new Serializer();
+                    WebResource r = new WebResource
+                    {
+                        Url = "http://example.com/start",
+                        FinalUrl = "http://example.com/final",
+                        RedirectOutcome = RedirectOutcomeEnum.LoopDetected,
+                        RedirectChain = new List<RedirectHop>
+                        {
+                            new RedirectHop("http://example.com/start", 302, "http://example.com/final")
+                        }
+                    };
+
+                    string json = serializer.SerializeJson(r, false);
+                    Check.Contains("\"FinalUrl\"", json);
+                    Check.Contains("\"RedirectChain\"", json);
+                    Check.Contains("\"RedirectOutcome\"", json);
+
+                    WebResource back = serializer.DeserializeJson<WebResource>(json);
+                    Check.Equal("http://example.com/final", back.FinalUrl);
+                    Check.Equal(RedirectOutcomeEnum.LoopDetected, back.RedirectOutcome);
+                    RedirectHop hop = Check.Single(back.RedirectChain);
+                    Check.Equal(302, hop.Status);
+                    Check.Equal("http://example.com/final", hop.Location);
                 }),
 
                 Case.Sync(Id, "Filename_FromPath", "Filename is extracted from the URL path", () =>

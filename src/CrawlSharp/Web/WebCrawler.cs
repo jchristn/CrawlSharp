@@ -1,10 +1,11 @@
-﻿namespace CrawlSharp.Web
+namespace CrawlSharp.Web
 {
     using System;
     using System.Collections.Generic;
     using System.Collections.Specialized;
     using System.IO;
     using System.Linq;
+    using System.Net;
     using System.Net.Http;
     using System.Runtime.CompilerServices;
     using System.Text;
@@ -123,6 +124,10 @@
 
         private readonly object _FinishedLinksLock = new object();
         private Queue<WebResource> _FinishedLinks = new Queue<WebResource>();
+        private HashSet<WebResource> _YieldedResources = new HashSet<WebResource>(ReferenceEqualityComparer.Instance);
+
+        private HashSet<string> _CredentialOrigins = new HashSet<string>(StringComparer.Ordinal);
+        private string _StartHost = null;
 
         private IPlaywright _IPlaywright = null;
         private IBrowser _IBrowser = null;
@@ -149,9 +154,14 @@
         /// </summary>
         /// <param name="settings">Settings.</param>
         /// <param name="token">Cancellation token.</param>
+        /// <exception cref="ArgumentNullException">Thrown when settings is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when the authentication settings are incomplete or ambiguous; see <see cref="AuthenticationSettings.Validate"/>.</exception>
         public WebCrawler(Settings settings, CancellationToken token = default)
         {
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _Settings.Authentication.Validate();
+            BuildCredentialScope();
+
             _Semaphore = new SemaphoreSlim(_Settings.Crawl.MaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
             _Token = token;
             _DelayMilliseconds = _Settings.Crawl.RequestDelayMs;
@@ -206,6 +216,7 @@
                     _ProcessingLinks?.Clear();
                     _VisitedLinks?.Clear();
                     _FinishedLinks?.Clear();
+                    _YieldedResources?.Clear();
 
                     _IBrowser?.CloseAsync().GetAwaiter().GetResult();
                     _IPlaywright?.Dispose();
@@ -217,6 +228,7 @@
                 _ProcessingLinks = null;
                 _VisitedLinks = null;
                 _FinishedLinks = null;
+                _YieldedResources = null;
                 _IBrowser = null;
                 _IPlaywright = null;
 
@@ -388,89 +400,350 @@
             return contentType.Contains("text/html") || contentType.Contains("application/xhtml+xml");
         }
 
-        private RestRequest RequestBuilder(string url)
-        {
-            RestRequest req = new RestRequest(url);
-            req.UserAgent = _Settings.Crawl.UserAgent;
-            req.TimeoutMilliseconds = _Settings.Crawl.PageTimeoutMs;
+        #region Credentials
 
-            if (_Settings.Authentication.Type != AuthenticationTypeEnum.None)
+        private void BuildCredentialScope()
+        {
+            _CredentialOrigins.Clear();
+
+            Uri startUri = null;
+            if (!String.IsNullOrEmpty(_Settings.Crawl.StartUrl)
+                && Uri.TryCreate(_Settings.Crawl.StartUrl, UriKind.Absolute, out startUri))
             {
-                if (_Settings.Authentication.Type == AuthenticationTypeEnum.ApiKey
-                    && !String.IsNullOrEmpty(_Settings.Authentication.ApiKeyHeader))
-                {
-                    req.Headers.Add(_Settings.Authentication.ApiKeyHeader, _Settings.Authentication.ApiKey);
-                }
-                else if (_Settings.Authentication.Type == AuthenticationTypeEnum.Basic)
-                {
-                    req.Authorization.User = _Settings.Authentication.Username;
-                    req.Authorization.Password = _Settings.Authentication.Password;
-                }
-                else if (_Settings.Authentication.Type == AuthenticationTypeEnum.BearerToken)
-                {
-                    req.Authorization.BearerToken = _Settings.Authentication.BearerToken;
-                }
-                else throw new ArgumentException("Unsupported authentication type " + _Settings.Authentication.Type.ToString());
+                _StartHost = startUri.Host;
             }
 
-            return req;
+            if (_Settings.Authentication.Type == AuthenticationTypeEnum.None) return;
+
+            if (startUri != null)
+            {
+                _CredentialOrigins.Add(RedirectPolicy.GetOrigin(startUri));
+
+                // An HTTP start URL also trusts its HTTPS upgrade on the default port, the most common redirect there is.
+                // An HTTPS start URL never trusts its HTTP twin, so a downgrade never carries credentials.
+                if (startUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+                {
+                    UriBuilder upgrade = new UriBuilder(startUri);
+                    upgrade.Scheme = Uri.UriSchemeHttps;
+                    upgrade.Port = 443;
+                    _CredentialOrigins.Add(RedirectPolicy.GetOrigin(upgrade.Uri));
+                }
+            }
+
+            foreach (string origin in _Settings.Authentication.CredentialOrigins)
+            {
+                _CredentialOrigins.Add(RedirectPolicy.GetOrigin(new Uri(origin.Trim(), UriKind.Absolute)));
+            }
         }
 
-        private async Task<ContentTypeInfo> CheckContentTypeAsync(string url, CancellationToken token)
+        private bool IsInCredentialScope(Uri uri)
         {
-            ContentTypeInfo result = new ContentTypeInfo
+            if (uri == null || !uri.IsAbsoluteUri || _CredentialOrigins.Count < 1) return false;
+            return _CredentialOrigins.Contains(RedirectPolicy.GetOrigin(uri));
+        }
+
+        private bool TryGetCredentialHeader(out string name, out string value)
+        {
+            name = null;
+            value = null;
+
+            switch (_Settings.Authentication.Type)
             {
-                IsNavigable = true,  // Default to navigable if check fails
-                MediaType = null,
-                ContentLength = null,
-                CheckSucceeded = false
+                case AuthenticationTypeEnum.Basic:
+                    name = "Authorization";
+                    value = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                        _Settings.Authentication.Username + ":" + (_Settings.Authentication.Password ?? String.Empty)));
+                    return true;
+                case AuthenticationTypeEnum.BearerToken:
+                    name = "Authorization";
+                    value = "Bearer " + _Settings.Authentication.BearerToken;
+                    return true;
+                case AuthenticationTypeEnum.ApiKey:
+                    name = _Settings.Authentication.ApiKeyHeader;
+                    value = _Settings.Authentication.ApiKey;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        #endregion
+
+        #region Redirect-Resolution
+
+        /// <summary>
+        /// Request a URL and follow its redirect chain one hop at a time.  The HTTP stack never follows redirects on its own,
+        /// so this loop decides every hop: the limit, loop detection, crawl scope, robots.txt, pacing and which requests carry credentials.
+        /// </summary>
+        /// <param name="requestUri">URL to request.</param>
+        /// <param name="method">GET, or HEAD for the headless content-type check.</param>
+        /// <param name="sameHostOnly">True for robots.txt and sitemap.xml, whose redirects are followed only on the start URL's host.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>The last response received and why the chain stopped.</returns>
+        private async Task<ResolvedResponse> ResolveAsync(Uri requestUri, HttpMethod method, bool sameHostOnly, CancellationToken token)
+        {
+            ResolvedResponse result = new ResolvedResponse
+            {
+                RequestedUri = requestUri,
+                FinalUri = requestUri
             };
 
-            try
+            HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+            CookieContainer cookies = new CookieContainer();
+
+            using (HttpClientHandler handler = new HttpClientHandler
             {
-                using var client = new HttpClient();
-                client.DefaultRequestHeaders.UserAgent.ParseAdd(_Settings.Crawl.UserAgent);
+                AllowAutoRedirect = false,
+                UseCookies = true,
+                CookieContainer = cookies
+            })
+            using (HttpClient client = new HttpClient(handler, false))
+            {
                 client.Timeout = TimeSpan.FromMilliseconds(_Settings.Crawl.PageTimeoutMs);
+                Uri current = requestUri;
 
-                var request = new HttpRequestMessage(HttpMethod.Head, url);
-
-                // Add authentication headers if needed
-                if (_Settings.Authentication.Type == AuthenticationTypeEnum.ApiKey
-                    && !String.IsNullOrEmpty(_Settings.Authentication.ApiKeyHeader))
+                while (true)
                 {
-                    request.Headers.Add(_Settings.Authentication.ApiKeyHeader, _Settings.Authentication.ApiKey);
-                }
-                else if (_Settings.Authentication.Type == AuthenticationTypeEnum.Basic)
-                {
-                    var authBytes = Encoding.ASCII.GetBytes($"{_Settings.Authentication.Username}:{_Settings.Authentication.Password}");
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
-                }
-                else if (_Settings.Authentication.Type == AuthenticationTypeEnum.BearerToken)
-                {
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _Settings.Authentication.BearerToken);
-                }
+                    token.ThrowIfCancellationRequested();
 
-                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                    // Key on URL plus the cookies the chain would send, so a site that sets a cookie and redirects back to the
+                    // same URL (a consent wall or session bootstrap) can still make progress, while a true cycle stops on its first repeat.
+                    string seenKey = current.AbsoluteUri + "\n" + cookies.GetCookieHeader(current);
+                    if (!seen.Add(seenKey))
+                    {
+                        Log("redirect loop detected at " + current + " while retrieving " + requestUri);
+                        result.Outcome = RedirectOutcomeEnum.LoopDetected;
+                        return result;
+                    }
 
-                if (response.IsSuccessStatusCode)
-                {
-                    result.MediaType = response.Content.Headers.ContentType?.MediaType?.ToLower() ?? "";
-                    result.ContentLength = response.Content.Headers.ContentLength;
-                    result.CheckSucceeded = true;
+                    if (result.Chain.Count > 0)
+                    {
+                        // Checks for every hop after the first; RetrieveWebResource checks the first request.
+                        string reason;
+                        if (!IsRedirectTargetInScope(current, sameHostOnly, out reason))
+                        {
+                            Log("not following redirect from " + result.FinalUri + " to " + current + ", " + reason);
+                            result.Outcome = RedirectOutcomeEnum.OutOfScope;
+                            return result;
+                        }
 
-                    // Determine if content is navigable based on Content-Type header
-                    // Only HTML-like content is considered navigable
-                    result.IsNavigable = IsNavigableContentType(result.MediaType);
+                        if (!_RobotsFile.IsPathAllowed(_Settings.Crawl.UserAgent, current.AbsolutePath))
+                        {
+                            Log("not following redirect from " + result.FinalUri + " to " + current + ", prohibited by robots.txt");
+                            result.Outcome = RedirectOutcomeEnum.RobotsDisallowed;
+                            return result;
+                        }
+
+                        if (IsAlreadyVisited(current))
+                        {
+                            Log("redirect from " + result.FinalUri + " reaches already visited URL " + current);
+                            result.AliasOf = GetAlreadyVisited(current);
+                            result.Outcome = RedirectOutcomeEnum.Followed;
+                            return result;
+                        }
+
+                        await Pause(token).ConfigureAwait(false);
+                        Log("following redirect to " + current);
+                    }
+
+                    await SendHopAsync(client, current, method, result, token).ConfigureAwait(false);
+
+                    string location = result.Headers != null ? result.Headers["Location"] : null;
+                    bool hasLocation = !String.IsNullOrWhiteSpace(location);
+
+                    if (!RedirectPolicy.IsRedirectStatus(result.Status, hasLocation))
+                    {
+                        result.Outcome = result.Chain.Count > 0 ? RedirectOutcomeEnum.Followed : RedirectOutcomeEnum.None;
+                        return result;
+                    }
+
+                    if (!_Settings.Crawl.FollowRedirects)
+                    {
+                        Log("redirect status " + result.Status + " for " + current + " not followed due to settings");
+                        result.Outcome = RedirectOutcomeEnum.NotFollowed;
+                        return result;
+                    }
+
+                    if (!hasLocation)
+                    {
+                        Log("redirect status " + result.Status + " for " + current + " has no Location header");
+                        result.Outcome = RedirectOutcomeEnum.MissingLocation;
+                        return result;
+                    }
+
+                    Uri target = RedirectPolicy.ResolveLocation(current, location);
+                    if (target == null)
+                    {
+                        Log("redirect status " + result.Status + " for " + current + " has an invalid Location header: " + location);
+                        result.Chain.Add(new RedirectHop(current.ToString(), result.Status, location.Trim()));
+                        result.Outcome = RedirectOutcomeEnum.InvalidLocation;
+                        return result;
+                    }
+
+                    result.Chain.Add(new RedirectHop(current.ToString(), result.Status, target.ToString()));
+
+                    if (result.Chain.Count > _Settings.Crawl.MaxRedirects)
+                    {
+                        Log("more than " + _Settings.Crawl.MaxRedirects + " redirects while retrieving " + requestUri + ", stopping at " + current);
+                        result.Outcome = RedirectOutcomeEnum.MaxRedirectsExceeded;
+                        return result;
+                    }
+
+                    method = RedirectPolicy.GetRedirectMethod(method, result.Status);
+                    current = target;
                 }
             }
-            catch (Exception ex)
-            {
-                // Log but don't throw - we'll default to navigable
-                Log($"Content type check failed for {url}: {ex.Message}");
-            }
-
-            return result;
         }
+
+        /// <summary>
+        /// Send one request, retrying on 429 as configured, and record the response on the result.
+        /// </summary>
+        private async Task SendHopAsync(HttpClient client, Uri uri, HttpMethod method, ResolvedResponse result, CancellationToken token)
+        {
+            int attempt = 0;
+
+            while (true)
+            {
+                using (HttpRequestMessage message = new HttpRequestMessage(method, uri))
+                {
+                    message.Headers.TryAddWithoutValidation("User-Agent", _Settings.Crawl.UserAgent);
+
+                    string credentialName;
+                    string credentialValue;
+                    if (IsInCredentialScope(uri) && TryGetCredentialHeader(out credentialName, out credentialValue))
+                        message.Headers.TryAddWithoutValidation(credentialName, credentialValue);
+
+                    HttpResponseMessage response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+
+                    using (RestResponse resp = new RestResponse(response))
+                    {
+                        if (attempt == 0)
+                        {
+                            result.RequestedUris.Add(uri);
+                            result.FinalUri = uri;
+                        }
+
+                        if (resp.StatusCode == 429)
+                        {
+                            Log("throttle status 429 for " + uri);
+
+                            if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries)
+                            {
+                                await DelayForRetry(uri, attempt, token).ConfigureAwait(false);
+                                attempt++;
+                                continue;
+                            }
+
+                            if (_Settings.Crawl.ThrottleMs > 0)
+                                await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            Log("status " + resp.StatusCode + " for URL " + uri);
+                        }
+
+                        result.Status = resp.StatusCode;
+                        result.Headers = resp.Headers;
+                        result.MediaType = response.Content?.Headers?.ContentType?.MediaType?.ToLowerInvariant();
+                        result.ETag = GetEtag(resp);
+                        result.Data = method == HttpMethod.Head ? null : await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
+                        return;
+                    }
+                }
+            }
+        }
+
+        private bool IsRedirectTargetInScope(Uri target, bool sameHostOnly, out string reason)
+        {
+            reason = null;
+
+            if (sameHostOnly)
+            {
+                if (String.IsNullOrEmpty(_StartHost) || !String.Equals(target.Host, _StartHost, StringComparison.OrdinalIgnoreCase))
+                {
+                    reason = "not on the start URL's host";
+                    return false;
+                }
+
+                return true;
+            }
+
+            // The domain, child-URL, external-link and exclusion filters apply only when links are followed, as documented on CrawlSettings.
+            if (!_Settings.Crawl.FollowLinks) return true;
+            return IsInCrawlScope(target.ToString(), out reason);
+        }
+
+        private WebResource BuildResource(ResolvedResponse resolved, string parentUrl, int depth, string contentType)
+        {
+            if (resolved.AliasOf != null)
+            {
+                RegisterVisited(resolved.RequestedUri, resolved.RequestedUris, null, resolved.AliasOf);
+                return resolved.AliasOf;
+            }
+
+            byte[] data = resolved.Data;
+
+            WebResource resource = new WebResource
+            {
+                Url = resolved.RequestedUri.ToString(),
+                FinalUrl = resolved.FinalUri.ToString(),
+                RedirectChain = resolved.Chain,
+                RedirectOutcome = resolved.Outcome,
+                ParentUrl = parentUrl,
+                Depth = depth,
+                Status = resolved.Status,
+                ContentType = contentType ?? resolved.MediaType ?? GetContentTypeFromHeaders(resolved.Headers),
+                ETag = resolved.ETag,
+                MD5Hash = data != null ? Convert.ToHexString(HashHelper.MD5Hash(data)) : null,
+                SHA1Hash = data != null ? Convert.ToHexString(HashHelper.SHA1Hash(data)) : null,
+                SHA256Hash = data != null ? Convert.ToHexString(HashHelper.SHA256Hash(data)) : null,
+                Headers = resolved.Headers,
+                Data = data
+            };
+
+            return RegisterVisited(resolved.RequestedUri, resolved.RequestedUris, resolved.FinalUri, resource);
+        }
+
+        /// <summary>
+        /// Record the requested URL, every URL requested along its chain and the final URL as visited, all pointing at one resource,
+        /// so a later link to any of them does not replay the chain.  When the final URL was already retrieved by another path,
+        /// the existing resource wins and is returned instead, which keeps a page reached twice from being yielded twice.
+        /// </summary>
+        private WebResource RegisterVisited(Uri requested, IEnumerable<Uri> chainUris, Uri final, WebResource resource)
+        {
+            lock (_VisitedLinksLock)
+            {
+                WebResource winner = resource;
+
+                if (final != null && !final.Equals(requested))
+                {
+                    WebResource existing;
+                    if (_VisitedLinks.TryGetValue(final, out existing) && existing != null && !ReferenceEquals(existing, resource))
+                    {
+                        Log("redirect from " + requested + " reaches " + final + ", which was already retrieved");
+                        winner = existing;
+                    }
+                    else
+                    {
+                        _VisitedLinks[final] = resource;
+                    }
+                }
+
+                if (chainUris != null)
+                {
+                    foreach (Uri uri in chainUris)
+                    {
+                        if (uri.Equals(final)) continue;
+                        _VisitedLinks[uri] = winner;
+                    }
+                }
+
+                _VisitedLinks[requested] = winner;
+                return winner;
+            }
+        }
+
+        #endregion
 
         private bool IsNavigableContentType(string contentType)
         {
@@ -489,167 +762,37 @@
                    contentType == "text/plain"; // Sometimes HTML is served as text/plain
         }
 
-        private async Task<WebResource> RetrieveWithRestClient(Uri normalizedUri, string parentUrl, int depth, string contentType, CancellationToken token)
+        private async Task<WebResource> RetrieveWithRestClient(Uri normalizedUri, string parentUrl, int depth, string contentType, bool sameHostOnly, CancellationToken token)
         {
-            int attempt = 0;
-
-            while (true)
-            {
-                using (RestRequest req = RequestBuilder(normalizedUri.ToString()))
-                {
-                    using (RestResponse resp = await req.SendAsync(token).ConfigureAwait(false))
-                    {
-                        if (resp == null)
-                        {
-                            Log("unable to retrieve " + normalizedUri);
-
-                            WebResource failedResource = new WebResource
-                            {
-                                Url = normalizedUri.ToString(),
-                                ParentUrl = parentUrl,
-                                Depth = depth,
-                                Status = 0,
-                                ContentType = contentType
-                            };
-
-                            AddAlreadyVisited(normalizedUri, failedResource);
-                            return failedResource;
-                        }
-
-                        if (resp.StatusCode >= 300 && resp.StatusCode <= 308)
-                        {
-                            Log("redirect status " + resp.StatusCode + " for URL " + normalizedUri);
-
-                            if (_Settings.Crawl.FollowRedirects)
-                            {
-                                string redirectLocation = resp.Headers.AllKeys
-                                    .FirstOrDefault(k => string.Equals(k, "Location", StringComparison.OrdinalIgnoreCase))
-                                    is string key ? resp.Headers[key] : null;
-
-                                if (String.IsNullOrEmpty(redirectLocation))
-                                {
-                                    Log("unable to retrieve redirect location from response for URL " + normalizedUri);
-                                }
-                                else
-                                {
-                                    string redirectNormalizedUrl = NormalizeUrl(normalizedUri.ToString(), redirectLocation);
-
-                                    Uri redirectUri;
-                                    try
-                                    {
-                                        redirectUri = new Uri(redirectNormalizedUrl);
-                                        if (!String.IsNullOrEmpty(redirectUri.Fragment))
-                                        {
-                                            UriBuilder builder = new UriBuilder(redirectUri);
-                                            builder.Fragment = "";
-                                            redirectUri = builder.Uri;
-                                        }
-                                    }
-                                    catch (UriFormatException ufe)
-                                    {
-                                        Exception?.Invoke(redirectNormalizedUrl, ufe);
-                                        Log("invalid redirect URI format: " + redirectNormalizedUrl);
-
-                                        byte[] redirectData = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
-
-                                        WebResource invalidRedirectResource = new WebResource
-                                        {
-                                            Url = normalizedUri.ToString(),
-                                            ParentUrl = parentUrl,
-                                            Depth = depth,
-                                            Status = resp.StatusCode,
-                                            ContentType = resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
-                                            Headers = resp.Headers,
-                                            Data = redirectData
-                                        };
-
-                                        AddAlreadyVisited(normalizedUri, invalidRedirectResource);
-                                        return invalidRedirectResource;
-                                    }
-
-                                    if (IsAlreadyVisited(redirectUri))
-                                    {
-                                        Log("redirect to already visited URL " + redirectUri + " from " + normalizedUri);
-                                        WebResource alreadyVisited = GetAlreadyVisited(redirectUri);
-                                        AddAlreadyVisited(normalizedUri, alreadyVisited);
-                                        return alreadyVisited;
-                                    }
-
-                                    Log("following redirect for URL " + normalizedUri + " to " + redirectUri);
-                                    WebResource redirectedResource = await RetrieveWebResource(redirectUri.ToString(), parentUrl, depth, token).ConfigureAwait(false);
-
-                                    if (redirectedResource != null)
-                                    {
-                                        AddAlreadyVisited(normalizedUri, redirectedResource);
-                                    }
-
-                                    return redirectedResource;
-                                }
-                            }
-                            else
-                            {
-                                Log("ignoring redirect response from URL " + normalizedUri);
-                            }
-                        }
-                        else if (resp.StatusCode == 429)
-                        {
-                            Log("throttle status 429 for " + normalizedUri);
-
-                            if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries)
-                            {
-                                await DelayForRetry(normalizedUri, attempt, token).ConfigureAwait(false);
-                                attempt++;
-                                continue;
-                            }
-
-                            if (_Settings.Crawl.ThrottleMs > 0)
-                                await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            Log("status " + resp.StatusCode + " for URL " + normalizedUri);
-                        }
-
-                        byte[] data = await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
-
-                        WebResource resource = new WebResource
-                        {
-                            Url = normalizedUri.ToString(),
-                            ParentUrl = parentUrl,
-                            Depth = depth,
-                            Status = resp.StatusCode,
-                            ContentType = contentType ?? resp.ContentType ?? GetContentTypeFromHeaders(resp.Headers),
-                            ETag = GetEtag(resp),
-                            MD5Hash = data != null ? Convert.ToHexString(HashHelper.MD5Hash(data)) : null,
-                            SHA1Hash = data != null ? Convert.ToHexString(HashHelper.SHA1Hash(data)) : null,
-                            SHA256Hash = data != null ? Convert.ToHexString(HashHelper.SHA256Hash(data)) : null,
-                            Headers = resp.Headers,
-                            Data = data
-                        };
-
-                        AddAlreadyVisited(normalizedUri, resource);
-                        return resource;
-                    }
-                }
-            }
+            ResolvedResponse resolved = await ResolveAsync(normalizedUri, HttpMethod.Get, sameHostOnly, token).ConfigureAwait(false);
+            return BuildResource(resolved, parentUrl, depth, contentType);
         }
 
-        private async Task<WebResource> RetrieveWithPlaywright(Uri normalizedUri, string parentUrl, int depth, string contentType, CancellationToken token)
+        private async Task<WebResource> RetrieveWithPlaywright(Uri requestedUri, ResolvedResponse check, string parentUrl, int depth, string contentType, bool sameHostOnly, CancellationToken token)
         {
+            // Navigate straight to the URL the content-type check resolved, so the browser normally sees no redirects at all.
+            Uri navigateUri = check != null ? check.FinalUri : requestedUri;
             int attempt = 0;
+            bool resolvedWithGet = false;
 
             while (true)
             {
-                await using var context = await _IBrowser.NewContextAsync(new BrowserNewContextOptions
+                await using IBrowserContext context = await _IBrowser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = _Settings.Crawl.UserAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
                     Locale = "en-US",
                     TimezoneId = "America/New_York",
                     AcceptDownloads = false
-                });
+                }).ConfigureAwait(false);
 
-                var page = await context.NewPageAsync();
+                // Set by the route handler when a credentialed navigation answers with a redirect; see RouteWithCredentials.
+                bool navigationRedirected = false;
+
+                if (_CredentialOrigins.Count > 0)
+                    await context.RouteAsync("**/*", route => RouteWithCredentials(route, () => navigationRedirected = true)).ConfigureAwait(false);
+
+                IPage page = await context.NewPageAsync().ConfigureAwait(false);
 
                 // Track if a download was initiated
                 bool downloadInitiated = false;
@@ -664,42 +807,91 @@
 
                     try
                     {
-                        response = await page.GotoAsync(normalizedUri.ToString(), new PageGotoOptions
+                        response = await page.GotoAsync(navigateUri.ToString(), new PageGotoOptions
                         {
                             WaitUntil = WaitUntilState.Load,
                             Timeout = _Settings.Crawl.PageTimeoutMs
-                        });
+                        }).ConfigureAwait(false);
+                    }
+                    catch (PlaywrightException) when (navigationRedirected)
+                    {
+                        // The route handler aborted the navigation because it redirected; handled below.
                     }
                     catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
                     {
                         // Download was triggered, fall back to REST client
-                        Log("download triggered for " + normalizedUri + ", using REST client");
-                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                        Log("download triggered for " + navigateUri + ", using REST client");
+                        return await RetrieveWithRestClient(requestedUri, parentUrl, depth, contentType, sameHostOnly, token).ConfigureAwait(false);
+                    }
+                    catch (PlaywrightException ex) when (IsRedirectLoopError(ex))
+                    {
+                        // Report the page instead of letting the navigation error drop it from the results.
+                        Log("browser reported a redirect loop for " + navigateUri + ": " + ex.Message);
+
+                        WebResource looped = new WebResource
+                        {
+                            Url = requestedUri.ToString(),
+                            FinalUrl = navigateUri.ToString(),
+                            RedirectChain = check != null ? check.Chain : new List<RedirectHop>(),
+                            RedirectOutcome = RedirectOutcomeEnum.LoopDetected,
+                            ParentUrl = parentUrl,
+                            Depth = depth,
+                            Status = 0,
+                            ContentType = contentType
+                        };
+
+                        return RegisterVisited(requestedUri, check != null ? check.RequestedUris : null, null, looped);
+                    }
+
+                    if (navigationRedirected)
+                    {
+                        // The page redirects on GET even though the HEAD check did not (or resolved elsewhere).  Resolve the chain
+                        // with GET through the crawler's own redirect handling, which attaches credentials per hop, then navigate
+                        // straight to where it ends.  Only once, so a server that keeps redirecting falls back to the REST client.
+                        if (resolvedWithGet)
+                        {
+                            Log("browser navigation to " + navigateUri + " redirected again, using REST client");
+                            return await RetrieveWithRestClient(requestedUri, parentUrl, depth, contentType, sameHostOnly, token).ConfigureAwait(false);
+                        }
+
+                        Log("browser navigation to " + navigateUri + " redirected, resolving the redirect chain with GET before navigating");
+                        ResolvedResponse resolved = await ResolveAsync(requestedUri, HttpMethod.Get, sameHostOnly, token).ConfigureAwait(false);
+
+                        if (resolved.AliasOf != null
+                            || (resolved.Outcome != RedirectOutcomeEnum.None && resolved.Outcome != RedirectOutcomeEnum.Followed))
+                        {
+                            return BuildResource(resolved, parentUrl, depth, contentType);
+                        }
+
+                        check = resolved;
+                        navigateUri = resolved.FinalUri;
+                        resolvedWithGet = true;
+                        continue;
                     }
 
                     // Check if download was initiated during navigation
                     if (downloadInitiated)
                     {
-                        Log("download initiated for " + normalizedUri + ", using REST client");
-                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                        Log("download initiated for " + navigateUri + ", using REST client");
+                        return await RetrieveWithRestClient(requestedUri, parentUrl, depth, contentType, sameHostOnly, token).ConfigureAwait(false);
                     }
 
                     if (response == null)
                     {
-                        Log("no response received for " + normalizedUri);
-                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentType, token);
+                        Log("no response received for " + navigateUri);
+                        return await RetrieveWithRestClient(requestedUri, parentUrl, depth, contentType, sameHostOnly, token).ConfigureAwait(false);
                     }
 
                     if (response.Status == 429)
                     {
-                        Log("throttle status 429 for " + normalizedUri);
+                        Log("throttle status 429 for " + navigateUri);
 
                         if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries)
                         {
                             if (page != null && !page.IsClosed)
-                                await page.CloseAsync();
+                                await page.CloseAsync().ConfigureAwait(false);
 
-                            await DelayForRetry(normalizedUri, attempt, token).ConfigureAwait(false);
+                            await DelayForRetry(navigateUri, attempt, token).ConfigureAwait(false);
                             attempt++;
                             continue;
                         }
@@ -709,37 +901,104 @@
                     }
                     else
                     {
-                        Log("status " + response.Status + " for URL " + normalizedUri);
+                        Log("status " + response.Status + " for URL " + navigateUri);
                     }
 
-                    if (IsAutoExpandEnabled(contentType))
-                    {
-                        Log("headless auto-expand enabled for " + normalizedUri);
-                        if (_Settings.Crawl.PostLoadDelayMs > 0)
-                        {
-                            Log("waiting " + _Settings.Crawl.PostLoadDelayMs + "ms before auto-expand for " + normalizedUri);
-                            await DelayIfNeeded(_Settings.Crawl.PostLoadDelayMs, token).ConfigureAwait(false);
-                        }
+                    Dictionary<string, string> headers = await response.AllHeadersAsync().ConfigureAwait(false);
 
-                        await ExpandCollapsibleContent(page, normalizedUri, token).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        Log("headless auto-expand disabled for " + normalizedUri);
-                    }
-
-                    string content = await page.ContentAsync();
-                    var headers = await response.AllHeadersAsync();
-
-                    NameValueCollection headerCollection = new NameValueCollection();
-                    foreach (var header in headers)
+                    NameValueCollection headerCollection = new NameValueCollection(StringComparer.InvariantCultureIgnoreCase);
+                    foreach (KeyValuePair<string, string> header in headers)
                     {
                         headerCollection.Add(header.Key, header.Value);
                     }
 
+                    if (RedirectPolicy.IsRedirectStatus(response.Status, !String.IsNullOrEmpty(headerCollection["Location"])))
+                    {
+                        // The browser stopped on a redirect instead of following it; let the REST client resolve the chain.
+                        Log("browser did not follow redirect status " + response.Status + " for " + navigateUri + ", using REST client");
+                        return await RetrieveWithRestClient(requestedUri, parentUrl, depth, contentType, sameHostOnly, token).ConfigureAwait(false);
+                    }
+
+                    // Redirects the browser followed itself, for example when a server redirects GET differently from HEAD.
+                    List<RedirectHop> browserHops = await GetBrowserRedirectHops(response).ConfigureAwait(false);
+
+                    List<RedirectHop> chain = new List<RedirectHop>();
+                    List<Uri> chainUris = new List<Uri>();
+                    if (check != null)
+                    {
+                        chain.AddRange(check.Chain);
+                        chainUris.AddRange(check.RequestedUris);
+                    }
+
+                    foreach (RedirectHop hop in browserHops)
+                    {
+                        chain.Add(hop);
+                        Uri hopUri;
+                        if (Uri.TryCreate(hop.Url, UriKind.Absolute, out hopUri)) chainUris.Add(hopUri);
+                    }
+
+                    Uri finalUri = RemoveFragment(new Uri(response.Url));
+
+                    if (browserHops.Count > 0)
+                    {
+                        RedirectOutcomeEnum stopped = RedirectOutcomeEnum.None;
+                        string reason;
+
+                        if (chain.Count > _Settings.Crawl.MaxRedirects)
+                        {
+                            stopped = RedirectOutcomeEnum.MaxRedirectsExceeded;
+                            reason = "more than " + _Settings.Crawl.MaxRedirects + " redirects";
+                        }
+                        else if (!IsRedirectTargetInScope(finalUri, sameHostOnly, out reason))
+                        {
+                            stopped = RedirectOutcomeEnum.OutOfScope;
+                        }
+
+                        if (stopped != RedirectOutcomeEnum.None)
+                        {
+                            Log("browser followed redirects from " + navigateUri + " to " + finalUri + " (" + reason + "), discarding content");
+
+                            RedirectHop lastHop = browserHops[browserHops.Count - 1];
+                            WebResource discarded = new WebResource
+                            {
+                                Url = requestedUri.ToString(),
+                                FinalUrl = lastHop.Url,
+                                RedirectChain = chain,
+                                RedirectOutcome = stopped,
+                                ParentUrl = parentUrl,
+                                Depth = depth,
+                                Status = lastHop.Status,
+                                ContentType = contentType
+                            };
+
+                            return RegisterVisited(requestedUri, chainUris, null, discarded);
+                        }
+                    }
+
+                    if (IsAutoExpandEnabled(contentType))
+                    {
+                        Log("headless auto-expand enabled for " + navigateUri);
+                        if (_Settings.Crawl.PostLoadDelayMs > 0)
+                        {
+                            Log("waiting " + _Settings.Crawl.PostLoadDelayMs + "ms before auto-expand for " + navigateUri);
+                            await DelayIfNeeded(_Settings.Crawl.PostLoadDelayMs, token).ConfigureAwait(false);
+                        }
+
+                        await ExpandCollapsibleContent(page, navigateUri, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        Log("headless auto-expand disabled for " + navigateUri);
+                    }
+
+                    string content = await page.ContentAsync().ConfigureAwait(false);
+
                     WebResource resource = new WebResource
                     {
-                        Url = normalizedUri.ToString(),
+                        Url = requestedUri.ToString(),
+                        FinalUrl = finalUri.ToString(),
+                        RedirectChain = chain,
+                        RedirectOutcome = chain.Count > 0 ? RedirectOutcomeEnum.Followed : RedirectOutcomeEnum.None,
                         ParentUrl = parentUrl,
                         Depth = depth,
                         Status = response.Status,
@@ -752,20 +1011,118 @@
                         Data = !String.IsNullOrEmpty(content) ? Encoding.UTF8.GetBytes(content) : Array.Empty<byte>()
                     };
 
-                    AddAlreadyVisited(normalizedUri, resource);
-                    return resource;
+                    return RegisterVisited(requestedUri, chainUris, finalUri, resource);
                 }
                 finally
                 {
                     if (page != null && !page.IsClosed)
                     {
-                        await page.CloseAsync();
+                        await page.CloseAsync().ConfigureAwait(false);
                     }
                 }
             }
         }
 
-        private async Task<WebResource> RetrieveWebResource(string url, string parentUrl, int depth, CancellationToken token = default)
+        /// <summary>
+        /// Attach credentials to browser requests whose origin is in the credential scope.  The request is fetched without
+        /// following redirects and its response handed to the browser.  route.ContinueAsync with headers is not used, because
+        /// Playwright carries those headers onto every redirect the request starts, including cross-origin ones.
+        /// Playwright does not route the requests a redirect starts, so the browser would follow a redirect without credentials.
+        /// For a subresource that is the safe direction and is accepted.  A redirected navigation is aborted instead, and
+        /// <paramref name="onNavigationRedirect"/> tells the caller to resolve the chain itself and navigate to where it ends.
+        /// </summary>
+        private async Task RouteWithCredentials(IRoute route, Action onNavigationRedirect)
+        {
+            Uri uri;
+            string name;
+            string value;
+
+            if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out uri)
+                || !IsInCredentialScope(uri)
+                || !TryGetCredentialHeader(out name, out value))
+            {
+                await route.ContinueAsync().ConfigureAwait(false);
+                return;
+            }
+
+            Dictionary<string, string> headers = new Dictionary<string, string>(route.Request.Headers, StringComparer.OrdinalIgnoreCase);
+            headers[name] = value;
+
+            try
+            {
+                IAPIResponse fetched = await route.FetchAsync(new RouteFetchOptions
+                {
+                    Headers = headers,
+                    MaxRedirects = 0,
+                    Timeout = _Settings.Crawl.PageTimeoutMs
+                }).ConfigureAwait(false);
+
+                string location;
+                fetched.Headers.TryGetValue("location", out location);
+
+                if (route.Request.IsNavigationRequest && RedirectPolicy.IsRedirectStatus(fetched.Status, !String.IsNullOrEmpty(location)))
+                {
+                    Log("browser navigation to " + uri + " answered " + fetched.Status + ", aborting so the chain is resolved with credentials");
+                    onNavigationRedirect?.Invoke();
+                    await route.AbortAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                await route.FulfillAsync(new RouteFulfillOptions
+                {
+                    Response = fetched
+                }).ConfigureAwait(false);
+            }
+            catch (PlaywrightException ex)
+            {
+                Log("credentialed browser request failed for " + uri + ": " + ex.Message);
+                await route.AbortAsync().ConfigureAwait(false);
+            }
+        }
+
+        private async Task<List<RedirectHop>> GetBrowserRedirectHops(IResponse response)
+        {
+            List<RedirectHop> hops = new List<RedirectHop>();
+            if (response == null || response.Request == null) return hops;
+
+            IRequest request = response.Request;
+            while (request.RedirectedFrom != null)
+            {
+                IRequest previous = request.RedirectedFrom;
+
+                // ResponseAsync can stay pending for a response that was fulfilled by a route handler, so bound the wait
+                // and record the hop with status 0 rather than stall the crawl.
+                Task<IResponse> responseTask = previous.ResponseAsync();
+                Task completed = await Task.WhenAny(responseTask, Task.Delay(2000)).ConfigureAwait(false);
+                IResponse previousResponse = null;
+
+                if (completed == responseTask) previousResponse = await responseTask.ConfigureAwait(false);
+                else _ = responseTask.ContinueWith(t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+
+                hops.Insert(0, new RedirectHop(previous.Url, previousResponse != null ? previousResponse.Status : 0, request.Url));
+                request = previous;
+            }
+
+            return hops;
+        }
+
+        private static bool IsRedirectLoopError(PlaywrightException ex)
+        {
+            string message = ex != null && ex.Message != null ? ex.Message : String.Empty;
+            return message.Contains("NS_ERROR_REDIRECT_LOOP", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_TOO_MANY_REDIRECTS", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("redirect loop", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Uri RemoveFragment(Uri uri)
+        {
+            if (uri == null || String.IsNullOrEmpty(uri.Fragment)) return uri;
+            UriBuilder builder = new UriBuilder(uri);
+            builder.Fragment = String.Empty;
+            return builder.Uri;
+        }
+
+        private async Task<WebResource> RetrieveWebResource(string url, string parentUrl, int depth, bool sameHostOnly, CancellationToken token = default)
         {
             try
             {
@@ -788,13 +1145,7 @@
                 Uri normalizedUri;
                 try
                 {
-                    normalizedUri = new Uri(fullUrl);
-                    if (!String.IsNullOrEmpty(normalizedUri.Fragment))
-                    {
-                        UriBuilder builder = new UriBuilder(normalizedUri);
-                        builder.Fragment = "";
-                        normalizedUri = builder.Uri;
-                    }
+                    normalizedUri = RemoveFragment(new Uri(fullUrl));
                 }
                 catch (UriFormatException ufe)
                 {
@@ -817,30 +1168,10 @@
 
                 Log("retrieving " + normalizedUri);
 
-                // Check content type to determine retrieval method
-                ContentTypeInfo contentInfo = null;
                 if (_Settings.Crawl.UseHeadlessBrowser)
-                {
-                    contentInfo = await CheckContentTypeAsync(normalizedUri.ToString(), token);
+                    return await RetrieveHeadless(normalizedUri, parentUrl, depth, sameHostOnly, token).ConfigureAwait(false);
 
-                    if (contentInfo.CheckSucceeded)
-                    {
-                        Log($"content type check for {normalizedUri}: {contentInfo.MediaType} navigable {contentInfo.IsNavigable}");
-                    }
-                }
-
-                // Decide which method to use for retrieval
-                bool usePlaywright = _Settings.Crawl.UseHeadlessBrowser &&
-                                    (contentInfo == null || contentInfo.IsNavigable);
-
-                if (usePlaywright)
-                {
-                    return await RetrieveWithPlaywright(normalizedUri, parentUrl, depth, contentInfo?.MediaType, token);
-                }
-                else
-                {
-                    return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentInfo?.MediaType, token);
-                }
+                return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, null, sameHostOnly, token).ConfigureAwait(false);
             }
             catch (IOException ioe)
             {
@@ -860,6 +1191,64 @@
                 Log("error processing URL " + url + Environment.NewLine + e.ToString());
                 return null;
             }
+        }
+
+        private async Task<WebResource> RetrieveHeadless(Uri normalizedUri, string parentUrl, int depth, bool sameHostOnly, CancellationToken token)
+        {
+            // Resolve the redirect chain with a HEAD request before launching the browser, so headless retrieval gets the same hop limit,
+            // loop detection, scope rules and credential scope as every other request, and non-navigable content is downloaded directly.
+            ResolvedResponse check = null;
+
+            try
+            {
+                check = await ResolveAsync(normalizedUri, HttpMethod.Head, sameHostOnly, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                // Some servers reject HEAD outright; navigate to the requested URL as before.
+                Log("content type check failed for " + normalizedUri + ": " + e.Message);
+            }
+
+            if (check != null)
+            {
+                if (check.AliasOf != null) return BuildResource(check, parentUrl, depth, null);
+
+                switch (check.Outcome)
+                {
+                    case RedirectOutcomeEnum.LoopDetected:
+                    case RedirectOutcomeEnum.MaxRedirectsExceeded:
+                    case RedirectOutcomeEnum.OutOfScope:
+                    case RedirectOutcomeEnum.RobotsDisallowed:
+                        // The chain itself is the problem; report it without launching the browser.
+                        return BuildResource(check, parentUrl, depth, null);
+
+                    case RedirectOutcomeEnum.NotFollowed:
+                    case RedirectOutcomeEnum.MissingLocation:
+                    case RedirectOutcomeEnum.InvalidLocation:
+                        // A single redirect response is the result; retrieve it with its body.
+                        return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, null, sameHostOnly, token).ConfigureAwait(false);
+                }
+            }
+
+            // Default to navigable if the check fails
+            ContentTypeInfo contentInfo = new ContentTypeInfo(true, null, null, false);
+
+            if (check != null && check.Status >= 200 && check.Status <= 299)
+            {
+                contentInfo.MediaType = check.MediaType ?? String.Empty;
+                contentInfo.CheckSucceeded = true;
+                contentInfo.IsNavigable = IsNavigableContentType(contentInfo.MediaType);
+                Log($"content type check for {check.FinalUri}: {contentInfo.MediaType} navigable {contentInfo.IsNavigable}");
+            }
+
+            if (contentInfo.IsNavigable)
+                return await RetrieveWithPlaywright(normalizedUri, contentInfo.CheckSucceeded ? check : null, parentUrl, depth, contentInfo.MediaType, sameHostOnly, token).ConfigureAwait(false);
+
+            return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentInfo.MediaType, sameHostOnly, token).ConfigureAwait(false);
         }
 
         private string GetContentTypeFromHeaders(NameValueCollection headers)
@@ -890,7 +1279,7 @@
             string domainRoot = GetDomainRoot(baseUrl);
             string robotsFile = domainRoot + "/robots.txt";
 
-            WebResource robots = await RetrieveWebResource(robotsFile, baseUrl, 0, token).ConfigureAwait(false);
+            WebResource robots = await RetrieveWebResource(robotsFile, baseUrl, 0, true, token).ConfigureAwait(false);
             if (robots != null
                 && robots.Status >= 200
                 && robots.Status <= 299
@@ -927,7 +1316,7 @@
             string domainRoot = GetDomainRoot(baseUrl);
             string sitemapUrl = domainRoot + "/sitemap.xml";
 
-            WebResource sitemap = await RetrieveWebResource(sitemapUrl, baseUrl, 0, token).ConfigureAwait(false);
+            WebResource sitemap = await RetrieveWebResource(sitemapUrl, baseUrl, 0, true, token).ConfigureAwait(false);
             if (sitemap != null
                 && sitemap.Status >= 200
                 && sitemap.Status <= 299
@@ -1409,6 +1798,59 @@
             return !string.Equals(testUri.Host, tempBaseUri.Host, StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Apply the crawl-scope filters (denied domains, same root domain, same subdomain, child URLs, allowed domains,
+        /// external links and exclusion patterns) to an absolute URL.  Used for discovered links and for redirect targets.
+        /// </summary>
+        private bool IsInCrawlScope(string url, out string reason)
+        {
+            reason = null;
+
+            if (IsDeniedDomain(url, _Settings.Crawl.DeniedDomains))
+            {
+                reason = "domain is denied";
+                return false;
+            }
+
+            if (_Settings.Crawl.RestrictToSameRootDomain && !IsSameRootDomain(_Settings.Crawl.StartUrl, url))
+            {
+                reason = "not in the start URL's root domain";
+                return false;
+            }
+
+            if (_Settings.Crawl.RestrictToSameSubdomain && !IsSameSubdomain(_Settings.Crawl.StartUrl, url))
+            {
+                reason = "not in the start URL's subdomain";
+                return false;
+            }
+
+            if (_Settings.Crawl.RestrictToChildUrls && !IsChildUrl(_Settings.Crawl.StartUrl, url))
+            {
+                reason = "not a child of the start URL";
+                return false;
+            }
+
+            if (!IsAllowedDomain(url, _Settings.Crawl.AllowedDomains))
+            {
+                reason = "domain is not in the allowed list";
+                return false;
+            }
+
+            if (!_Settings.Crawl.FollowExternalLinks && IsExternalUrl(_Settings.Crawl.StartUrl, url))
+            {
+                reason = "external link";
+                return false;
+            }
+
+            if (IsUrlExcluded(url))
+            {
+                reason = "matches an exclusion pattern";
+                return false;
+            }
+
+            return true;
+        }
+
         private bool IsUrlExcluded(string url)
         {
             if (_Settings.Crawl.ExcludeLinkPatterns == null || _Settings.Crawl.ExcludeLinkPatterns.Count < 1) return false;
@@ -1614,15 +2056,6 @@
             }
         }
 
-        private void AddAlreadyVisited(Uri uri, WebResource wr)
-        {
-            lock (_VisitedLinksLock)
-            {
-                if (_VisitedLinks.ContainsKey(uri)) _VisitedLinks[uri] = wr;
-                else _VisitedLinks.Add(uri, wr);
-            }
-        }
-
         private WebResource GetAlreadyVisited(Uri uri)
         {
             lock (_VisitedLinksLock)
@@ -1690,6 +2123,14 @@
             lock (_FinishedLinksLock)
             {
                 _FinishedLinks.Enqueue(wr);
+            }
+        }
+
+        private bool TryMarkYielded(WebResource wr)
+        {
+            lock (_FinishedLinksLock)
+            {
+                return _YieldedResources.Add(wr);
             }
         }
 
@@ -1805,16 +2246,28 @@
                         return;
                     }
 
-                    WebResource wr = await RetrieveWebResource(link.Url, link.ParentUrl, link.Depth, token).ConfigureAwait(false);
+                    WebResource wr = await RetrieveWebResource(link.Url, link.ParentUrl, link.Depth, false, token).ConfigureAwait(false);
                     if (wr == null)
                     {
                         Log("unable to retrieve queued link " + link.Url);
                         return;
                     }
 
-                    if (wr.Data != null && IsNavigableContentType(wr.ContentType))
+                    if (!TryMarkYielded(wr))
                     {
-                        List<string> links = ExtractLinksFromHtml(link.Url, wr.Data);
+                        // A redirect led to a page another link already produced; it was returned (and its links queued) then.
+                        Log("resource for " + link.Url + " was already returned as " + wr.Url + ", skipping");
+                        return;
+                    }
+
+                    // A result that stopped on a redirect carries the redirect body, not page content, so its links are not followed.
+                    bool isContent = wr.RedirectOutcome == RedirectOutcomeEnum.None || wr.RedirectOutcome == RedirectOutcomeEnum.Followed;
+
+                    if (isContent && wr.Data != null && IsNavigableContentType(wr.ContentType))
+                    {
+                        // Resolve relative links against the URL the content came from, which differs from link.Url after a redirect.
+                        string baseUrl = !String.IsNullOrEmpty(wr.FinalUrl) ? wr.FinalUrl : link.Url;
+                        List<string> links = ExtractLinksFromHtml(baseUrl, wr.Data);
 
                         if (_Settings.Crawl.FollowLinks)
                         {
@@ -1833,9 +2286,10 @@
                                             continue;
                                         }
 
-                                        if (IsDeniedDomain(currTrimmed, _Settings.Crawl.DeniedDomains))
+                                        string reason;
+                                        if (!IsInCrawlScope(currTrimmed, out reason))
                                         {
-                                            Log("avoiding denied domain in link " + currTrimmed);
+                                            Log("avoiding link " + currTrimmed + ", " + reason);
                                             continue;
                                         }
 
@@ -1853,42 +2307,6 @@
                                         if (IsAlreadyVisited(childUri))
                                         {
                                             Log("already visited child link " + currTrimmed);
-                                            continue;
-                                        }
-
-                                        if (_Settings.Crawl.RestrictToSameRootDomain && !IsSameRootDomain(_Settings.Crawl.StartUrl, currTrimmed))
-                                        {
-                                            Log("avoiding link not in root domain " + currTrimmed);
-                                            continue;
-                                        }
-
-                                        if (_Settings.Crawl.RestrictToSameSubdomain && !IsSameSubdomain(_Settings.Crawl.StartUrl, currTrimmed))
-                                        {
-                                            Log("avoiding link not in subdomain " + currTrimmed);
-                                            continue;
-                                        }
-
-                                        if (_Settings.Crawl.RestrictToChildUrls && !IsChildUrl(_Settings.Crawl.StartUrl, currTrimmed))
-                                        {
-                                            Log("avoiding non-child link " + currTrimmed);
-                                            continue;
-                                        }
-
-                                        if (!IsAllowedDomain(currTrimmed, _Settings.Crawl.AllowedDomains))
-                                        {
-                                            Log("avoiding disallowed domain in link " + currTrimmed);
-                                            continue;
-                                        }
-
-                                        if (!_Settings.Crawl.FollowExternalLinks && IsExternalUrl(_Settings.Crawl.StartUrl, currTrimmed))
-                                        {
-                                            Log("avoiding external link " + currTrimmed);
-                                            continue;
-                                        }
-
-                                        if (IsUrlExcluded(currTrimmed))
-                                        {
-                                            Log("avoiding URL " + currTrimmed + " due to match from exclusion list");
                                             continue;
                                         }
 

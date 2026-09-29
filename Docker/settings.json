@@ -15,6 +15,7 @@
     "IncludeSitemap": true,
     "FollowLinks": true,
     "FollowRedirects": true,
+    "MaxRedirects": 10,
     "RestrictToChildUrls": false,
     "RestrictToSameSubdomain": false,
     "RestrictToSameRootDomain": true,

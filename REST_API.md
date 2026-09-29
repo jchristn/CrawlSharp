@@ -15,6 +15,13 @@ Upon completion, `data` will be sent with the value `[DONE]`.
 When `UseHeadlessBrowser` is enabled for navigable pages, `WebResource.Data` contains rendered HTML captured from the browser DOM.
 `AutoExpandCollapsibles` is opt-in, ignored unless `UseHeadlessBrowser` is `true`, and can be combined with the delay and selector settings shown below.
 
+The crawler follows redirects itself, up to `MaxRedirects` hops per page, and stops a redirect loop after one pass.  Each `WebResource` describes what happened with these fields:
+
+- `Url` is the address that was requested
+- `FinalUrl` is the address the content in `Data` came from; it equals `Url` when there was no redirect
+- `RedirectChain` lists each redirect received (`Url`, `Status`, `Location`)
+- `RedirectOutcome` says why redirect following stopped: `None`, `Followed`, `NotFollowed`, `LoopDetected`, `MaxRedirectsExceeded`, `OutOfScope`, `RobotsDisallowed`, `MissingLocation` or `InvalidLocation`
+
 ```
 POST /crawl
 Content-Type: application/json
@@ -35,6 +42,7 @@ Content-Type: application/json
     "IncludeSitemap": true,
     "FollowLinks": true,
     "FollowRedirects": true,
+    "MaxRedirects": 10,
     "RestrictToChildUrls": false,
     "RestrictToSameSubdomain": false,
     "RestrictToSameRootDomain": true,
@@ -56,9 +64,50 @@ Content-Type: application/json
 }
 
 Response:
-data: {"Url":"https://somehost.com/page1","ParentUrl":"https://somehost.com","Depth":1,"Status":200,"ContentLength":46586,"Headers":{"Age":"0","Cache-Control":"no-store, must-revalidate, no-cache, max-age=0, private","Date":"Sun, 02 Mar 2025 20:21:54 GMT","ETag":"\u0022b8w9q5o4vtzxw\u0022"},"Data":"[page data as base64]"}
+data: {"Url":"https://somehost.com/page1","FinalUrl":"https://somehost.com/page1","RedirectChain":[],"RedirectOutcome":"None","ParentUrl":"https://somehost.com","Depth":1,"Status":200,"ContentLength":46586,"Headers":{"Age":"0","Cache-Control":"no-store, must-revalidate, no-cache, max-age=0, private","Date":"Sun, 02 Mar 2025 20:21:54 GMT","ETag":""b8w9q5o4vtzxw""},"Data":"[page data as base64]"}
 
-data: {"Url":"https://somehost.com/page2","ParentUrl":"https://somehost.com","Depth":1,"Status":200,"ContentLength":1234,"Headers":{"Age":"0","Cache-Control":"no-store, must-revalidate, no-cache, max-age=0, private","Date":"Sun, 02 Mar 2025 20:21:54 GMT","ETag":"\u0022b8w9q5o4vtzxw\u0022"},"Data":"[page data as base64]"}
+data: {"Url":"https://somehost.com/docs","FinalUrl":"https://somehost.com/docs/","RedirectChain":[{"Url":"https://somehost.com/docs","Status":301,"Location":"https://somehost.com/docs/"}],"RedirectOutcome":"Followed","ParentUrl":"https://somehost.com","Depth":1,"Status":200,"ContentLength":1234,"Headers":{"Age":"0","Cache-Control":"no-store, must-revalidate, no-cache, max-age=0, private","Date":"Sun, 02 Mar 2025 20:21:54 GMT"},"Data":"[page data as base64]"}
 
 data: [DONE]
+```
+
+## Crawl an Authenticated Site
+
+Set `Authentication.Type` to `Basic`, `ApiKey` or `BearerToken` and supply that type's fields.  Credentials are sent only to the start URL's origin (scheme, host and port), to its HTTPS version when the start URL is plain HTTP, and to any origins listed in `CredentialOrigins`.  They are attached to each qualifying request, including same-origin redirect targets, and never to other origins, whether reached by a redirect or a link.
+
+```
+POST /crawl
+Content-Type: application/json
+{
+  "Authentication": {
+    "Type": "Basic",
+    "Username": "crawler",
+    "Password": "secret",
+    "CredentialOrigins": [
+      "https://docs.somehost.com"
+    ]
+  },
+  "Crawl": {
+    "StartUrl": "https://somehost.com",
+    "FollowLinks": true,
+    "FollowRedirects": true,
+    "MaxRedirects": 10,
+    "MaxCrawlDepth": 2
+  }
+}
+```
+
+## Errors
+
+Invalid settings are rejected with `400/Bad Request` before the event stream starts, and the `Description` explains the problem.  This includes incomplete or ambiguous `Authentication` (for example `Type` set to `ApiKey` without `ApiKeyHeader`, or credential fields set while `Type` is `None`), a `CredentialOrigins` entry that is not an absolute http or https URL, and out-of-range values such as `MaxRedirects` outside 1 to 50.
+
+```
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+{
+  "Error": "BadRequest",
+  "Message": "We were unable to discern your request.  Please check your URL, query, and request body.",
+  "StatusCode": 400,
+  "Description": "Authentication.Type is ApiKey, but ApiKeyHeader is not set. (Parameter 'ApiKeyHeader')"
+}
 ```

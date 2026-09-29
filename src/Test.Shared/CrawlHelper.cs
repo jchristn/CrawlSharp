@@ -63,5 +63,33 @@ namespace Test.Shared
             List<WebResource> resources = await CrawlAllAsync(settings, token).ConfigureAwait(false);
             return Check.Single(resources, "Expected exactly one crawled resource but received " + resources.Count + ".");
         }
+
+        /// <summary>
+        /// Execute a crawl that must finish on its own within the given time.  A crawl that would hang (for example on a
+        /// redirect loop) is cancelled and reported as a failed check instead of stalling the test run.
+        /// </summary>
+        public static async Task<List<WebResource>> CrawlAllWithinAsync(Settings settings, int timeoutSeconds, CancellationToken token = default)
+        {
+            using CancellationTokenSource timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token);
+
+            try
+            {
+                return await CrawlAllAsync(settings, linked.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !token.IsCancellationRequested)
+            {
+                throw new CheckException("The crawl did not finish within " + timeoutSeconds + " seconds.");
+            }
+        }
+
+        /// <summary>
+        /// Execute a crawl that must finish within the given time and return the single expected resource.
+        /// </summary>
+        public static async Task<WebResource> CrawlSingleWithinAsync(Settings settings, int timeoutSeconds, CancellationToken token = default)
+        {
+            List<WebResource> resources = await CrawlAllWithinAsync(settings, timeoutSeconds, token).ConfigureAwait(false);
+            return Check.Single(resources, "Expected exactly one crawled resource but received " + resources.Count + ".");
+        }
     }
 }

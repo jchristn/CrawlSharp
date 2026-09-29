@@ -637,6 +637,39 @@ table tbody tr:last-child td {
   box-shadow: 0 0 0 3px var(--primary-light);
 }
 
+.form-group.has-error input,
+.form-group.has-error textarea,
+.form-group.has-error select {
+  border-color: var(--danger);
+}
+
+.form-group .form-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin-top: 4px;
+}
+
+.form-summary-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.form-summary-error ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+.url-final {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .form-group textarea {
   resize: vertical;
   min-height: 80px;
