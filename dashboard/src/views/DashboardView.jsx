@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { checkServerHealth } from '../utils/api.js'
 import { getCrawlHistory } from '../utils/store.js'
+import ExternalServicesCard from '../components/ExternalServicesCard.jsx'
 
 export default function DashboardView({ serverUrl }) {
   const navigate = useNavigate()
@@ -207,6 +208,8 @@ export default function DashboardView({ serverUrl }) {
           </div>
         )}
       </div>
+
+      <ExternalServicesCard />
     </div>
   )
 }

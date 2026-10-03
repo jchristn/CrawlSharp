@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrawlSharp\CrawlSharp.csproj" />
+    <ProjectReference Include="..\CrawlSharp.Server\CrawlSharp.Server.csproj" />
   </ItemGroup>
 
   <ItemGroup>

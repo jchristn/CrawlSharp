@@ -3,11 +3,14 @@
     using System;
     using System.Collections;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Runtime.Loader;
+    using System.Text;
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
+    using CrawlSharp.Telemetry;
     using CrawlSharp.Web;
     using SerializationHelper;
     using SyslogLogging;
@@ -24,6 +27,7 @@
         private static LoggingModule _Logging;
         private static Webserver _Webserver;
         private static Serializer _Serializer = new Serializer();
+        private static TelemetryService _Telemetry;
 
         private static string _Hostname = "localhost";
         private static int _Port = 8000;
@@ -48,7 +52,21 @@
             _Logging.Settings.FileLogging = FileLoggingMode.FileWithDate;
             _Logging.Settings.LogFilename = "logs/" + "crawlsharp.log";
 
-            _Webserver = new Webserver(new WebserverSettings
+            TelemetrySettings telemetrySettings;
+            try
+            {
+                telemetrySettings = TelemetrySettings.FromEnvironment();
+            }
+            catch (ArgumentException e)
+            {
+                _Logging.Warn(_Header + "invalid telemetry configuration, using defaults: " + e.Message);
+                telemetrySettings = new TelemetrySettings();
+            }
+
+            // The single telemetry host for the process; it subscribes to Watson's built-in HTTP telemetry and to CrawlSharp's.
+            _Telemetry = new TelemetryService(telemetrySettings, _Logging);
+
+            WebserverSettings webserverSettings = new WebserverSettings
             {
                 Hostname = _Hostname,
                 Port = _Port,
@@ -56,7 +74,16 @@
                 {
                     Enable = false
                 }
-            }, DefaultRoute);
+            };
+
+            // Watson emits the HTTP metrics and the per-request server span; these are the defaults, set explicitly so the
+            // contract is visible here.  Radiant serves /metrics, so Watson's own in-process scrape endpoint stays off.
+            webserverSettings.Telemetry.Enable = true;
+            webserverSettings.Telemetry.EnableMetrics = true;
+            webserverSettings.Telemetry.EnableTraces = true;
+            webserverSettings.Telemetry.PropagateContext = true;
+
+            _Webserver = new Webserver(webserverSettings, DefaultRoute);
 
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.HEAD, "/", RootRoute, ExceptionRoute);
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.GET, "/", RootRoute, ExceptionRoute);
@@ -83,7 +110,7 @@
             Console.WriteLine("Webserver started on " + _Webserver.Settings.Prefix);
             Console.WriteLine("");
 
-            _Logging.Info(_Header + "server started");
+            LogInfo("server started");
 
             EventWaitHandle waitHandle = new EventWaitHandle(false, EventResetMode.AutoReset);
             AssemblyLoadContext.Default.Unloading += (ctx) => waitHandle.Set();
@@ -100,7 +127,10 @@
             }
             while (!waitHandleSignal);
 
-            _Logging.Info(_Header + "server stopped");
+            LogInfo("server stopped");
+
+            try { _Webserver.Stop(); } catch (Exception) { }
+            _Telemetry?.Dispose();
         }
 
         private static void Welcome()
@@ -165,9 +195,27 @@
             }
         }
 
+        private static void LogInfo(string msg)
+        {
+            _Logging.Info(_Header + msg);
+            _Telemetry?.Info(_Header + msg);
+        }
+
+        private static void LogWarn(string msg)
+        {
+            _Logging.Warn(_Header + msg);
+            _Telemetry?.Warn(_Header + msg);
+        }
+
+        private static void LogDebug(string msg)
+        {
+            _Logging.Debug(_Header + msg);
+            _Telemetry?.Debug(_Header + msg);
+        }
+
         private static async Task ExceptionRoute(HttpContextBase ctx, Exception e)
         {
-            _Logging.Warn(_Header + "exception encountered:" + Environment.NewLine + e.ToString());
+            LogWarn("exception encountered:" + Environment.NewLine + e.ToString());
 
             ctx.Response.ContentType = Constants.JsonContentType;
 
@@ -230,41 +278,174 @@
         {
             ctx.Response.ContentType = Constants.JsonContentType;
 
-            if (ctx.Request.DataAsString == null || ctx.Request.DataAsString.Length < 1)
+            // One span for the crawl request under Watson's HTTP server span; the library's crawl span nests under it.
+            long startTimestamp = Stopwatch.GetTimestamp();
+            Activity previous = Activity.Current;
+            Activity span = ServerInstruments.StartActivity(CrawlSharpTelemetry.SpanServerCrawlRequest);
+            string outcome = ServerInstruments.OutcomeFailed;
+            bool streamOpen = false;
+            long events = 0;
+
+            try
             {
-                _Logging.Warn(_Header + "no request body from " + ctx.Request.Source.IpAddress);
-                ctx.Response.StatusCode = 400;
-                await ctx.Response.Send(_Serializer.SerializeJson(new ApiErrorResponse(ApiErrorEnum.BadRequest), true));
-                return;
-            }
-
-            Settings settings = _Serializer.DeserializeJson<Settings>(ctx.Request.DataAsString);
-
-            using (WebCrawler crawler = new WebCrawler(settings))
-            using (Timestamp ts = new Timestamp())
-            {
-                ctx.Response.ServerSentEvents = true;
-                ts.Start = DateTime.UtcNow;
-
-                _Logging.Debug(_Header + "crawl request received from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl);
-
-                await foreach (WebResource resource in crawler.CrawlAsync())
+                if (ctx.Request.DataAsString == null || ctx.Request.DataAsString.Length < 1)
                 {
-                    await ctx.Response.SendEvent(new ServerSentEvent
-                    {
-                        Data = _Serializer.SerializeJson(resource, false)
-                    },
-                    false);
+                    LogWarn("no request body from " + ctx.Request.Source.IpAddress);
+                    outcome = ServerInstruments.OutcomeBadRequest;
+                    ctx.Response.StatusCode = 400;
+                    await ctx.Response.Send(_Serializer.SerializeJson(new ApiErrorResponse(ApiErrorEnum.BadRequest), true));
+                    return;
                 }
 
-                await ctx.Response.SendEvent(new ServerSentEvent
+                Settings settings = RunStage(CrawlSharpTelemetry.ServerStageDeserialize, ServerInstruments.OutcomeDeserializationError, ref outcome,
+                    () => _Serializer.DeserializeJson<Settings>(ctx.Request.DataAsString));
+
+                WebCrawler crawler = RunStage(CrawlSharpTelemetry.ServerStageCrawlerInit, ServerInstruments.OutcomeInvalidSettings, ref outcome,
+                    () => new WebCrawler(settings));
+
+                using (crawler)
+                using (Timestamp ts = new Timestamp())
                 {
-                    Data = "[DONE]"
-                }, true);
+                    if (_Telemetry != null && _Telemetry.IsDebugEnabled) crawler.Logger = msg => _Telemetry.Debug(msg);
+                    crawler.Exception = (url, e) => _Telemetry?.Warn("[WebCrawler] exception processing " + url + ": " + e.GetType().FullName + ": " + e.Message);
 
-                ts.End = DateTime.UtcNow;
+                    ctx.Response.ServerSentEvents = true;
+                    ts.Start = DateTime.UtcNow;
+                    ServerInstruments.AddStream(1);
+                    streamOpen = true;
 
-                _Logging.Debug(_Header + "completed crawl request from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl + " (" + ts.TotalMs + "ms)");
+                    LogDebug("crawl request received from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl);
+
+                    bool clientGone = false;
+
+                    await foreach (WebResource resource in crawler.CrawlAsync())
+                    {
+                        string data = _Serializer.SerializeJson(resource, false);
+
+                        if (!await SendEventAsync(ctx, data))
+                        {
+                            // The client stopped reading; stop crawling for it rather than fetching pages nobody will receive.
+                            LogWarn("client " + ctx.Request.Source.IpAddress + " stopped reading the crawl of " + settings.Crawl.StartUrl + ", stopping");
+                            clientGone = true;
+                            break;
+                        }
+
+                        events++;
+                    }
+
+                    if (clientGone)
+                    {
+                        outcome = ServerInstruments.OutcomeClientDisconnected;
+                    }
+                    else
+                    {
+                        await ctx.Response.SendEvent(new ServerSentEvent
+                        {
+                            Data = "[DONE]"
+                        }, true);
+
+                        outcome = ServerInstruments.OutcomeCompleted;
+                    }
+
+                    ts.End = DateTime.UtcNow;
+
+                    LogDebug("completed crawl request from " + ctx.Request.Source.IpAddress + " for " + settings.Crawl.StartUrl + " (" + ts.TotalMs + "ms)");
+                }
+            }
+            catch (Exception e)
+            {
+                if (outcome == ServerInstruments.OutcomeFailed) ServerInstruments.SetError(span, e);
+                throw;
+            }
+            finally
+            {
+                if (streamOpen) ServerInstruments.AddStream(-1);
+                ServerInstruments.RecordRequest(outcome, ServerInstruments.ElapsedSeconds(startTimestamp));
+
+                if (span != null)
+                {
+                    try
+                    {
+                        span.SetTag(CrawlSharpTelemetry.AttributeOutcome, outcome);
+                        span.SetTag(CrawlSharpTelemetry.AttributeSseEvents, events);
+                        if (span.Status != ActivityStatusCode.Error)
+                        {
+                            if (outcome == ServerInstruments.OutcomeFailed) span.SetStatus(ActivityStatusCode.Error, outcome);
+                            else span.SetStatus(ActivityStatusCode.Ok);
+                        }
+
+                        span.Dispose();
+                        if (!ReferenceEquals(Activity.Current, previous)) Activity.Current = previous;
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+        }
+
+        private static T RunStage<T>(string stage, string failureOutcome, ref string outcome, Func<T> work)
+        {
+            long startTimestamp = Stopwatch.GetTimestamp();
+            Activity previous = Activity.Current;
+            Activity activity = ServerInstruments.StartActivity(CrawlSharpTelemetry.SpanStagePrefix + stage);
+            string stageOutcome = CrawlSharpTelemetry.OutcomeSuccess;
+
+            try
+            {
+                return work();
+            }
+            catch (Exception e)
+            {
+                // JSON and argument errors are the caller's mistake and become a 400 in ExceptionRoute; anything else is a server failure.
+                stageOutcome = CrawlSharpTelemetry.OutcomeFailure;
+                outcome = (e is JsonException || e is ArgumentException) ? failureOutcome : ServerInstruments.OutcomeFailed;
+                ServerInstruments.SetError(activity, e);
+                throw;
+            }
+            finally
+            {
+                ServerInstruments.RecordStage(stage, stageOutcome, ServerInstruments.ElapsedSeconds(startTimestamp));
+
+                if (activity != null)
+                {
+                    try
+                    {
+                        activity.SetTag(CrawlSharpTelemetry.AttributeOutcome, stageOutcome);
+                        if (activity.Status != ActivityStatusCode.Error) activity.SetStatus(ActivityStatusCode.Ok);
+                        activity.Dispose();
+                        if (!ReferenceEquals(Activity.Current, previous)) Activity.Current = previous;
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+        }
+
+        private static async Task<bool> SendEventAsync(HttpContextBase ctx, string data)
+        {
+            long startTimestamp = Stopwatch.GetTimestamp();
+            bool sent = false;
+
+            try
+            {
+                sent = await ctx.Response.SendEvent(new ServerSentEvent
+                {
+                    Data = data
+                },
+                false);
+
+                return sent;
+            }
+            finally
+            {
+                ServerInstruments.RecordStage(
+                    CrawlSharpTelemetry.ServerStageSseSend,
+                    sent ? CrawlSharpTelemetry.OutcomeSuccess : CrawlSharpTelemetry.OutcomeFailure,
+                    ServerInstruments.ElapsedSeconds(startTimestamp));
+
+                if (sent) ServerInstruments.RecordEvent(data != null ? Encoding.UTF8.GetByteCount(data) : 0);
             }
         }
 
@@ -285,7 +466,7 @@
         private static async Task PostRoutingRoute(HttpContextBase ctx)
         {
             ctx.Request.Timestamp.End = DateTime.UtcNow;
-            _Logging.Debug(_Header + ctx.Request.Method + " " + ctx.Request.Url.RawWithQuery + ": " + ctx.Response.StatusCode + " (" + ctx.Request.Timestamp.TotalMs + "ms)");
+            LogDebug(ctx.Request.Method + " " + ctx.Request.Url.RawWithQuery + ": " + ctx.Response.StatusCode + " (" + ctx.Request.Timestamp.TotalMs + "ms)");
         }
 
 #pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously

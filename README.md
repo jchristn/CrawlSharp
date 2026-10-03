@@ -6,6 +6,13 @@
 
 CrawlSharp is a library and integrated webserver for crawling basic web content.
 
+## New in v1.2.0
+
+- Built-in observability: the library emits metrics and traces for every crawl job, pipeline stage, page, link, redirect and outbound HTTP or Playwright call through the BCL `Meter` and `ActivitySource` named `CrawlSharp`, with no exporter dependency and near-zero cost until something subscribes; see [Observability](#observability)
+- The server hosts one [Radiant](https://www.nuget.org/packages/Radiant) telemetry pipeline: traces to Tempo over OTLP, logs to Loki, and every metric (Watson HTTP, CrawlSharp, .NET runtime) on a Prometheus endpoint
+- `Docker/compose.yaml` adds Prometheus, Tempo, Loki and Grafana with six provisioned dashboards, and the dashboard home page gains an External Services card
+- The server stops crawling when a client stops reading the event stream, and a failed page can no longer over-release a worker slot
+
 ## New in v1.1.0
 
 - Redirects are followed by CrawlSharp itself, one hop at a time: a redirect loop ends after one pass instead of hanging the crawl, and chains stop at `MaxRedirects` (default 10)
@@ -313,7 +320,7 @@ Use the top-right server endpoint icon in the dashboard toolbar to change the ac
 
 ### Running with Docker Compose
 
-The easiest way to run both the server and dashboard together is with Docker Compose.  The `Docker/compose.yaml` includes both the `crawlsharp-server` and `crawlsharp-ui` services.  The dashboard container uses nginx to reverse-proxy API requests to the CrawlSharp server internally, so no direct browser-to-server connectivity is needed.
+The easiest way to run both the server and dashboard together is with Docker Compose.  The `Docker/compose.yaml` includes the `crawlsharp-server` and `crawlsharp-ui` services and the observability stack (Prometheus, Tempo, Loki and Grafana; see [Observability](#observability)).  The dashboard container uses nginx to reverse-proxy API requests to the CrawlSharp server internally, so no direct browser-to-server connectivity is needed.
 
 The `CRAWLSHARP_SERVER_URL` environment variable controls the server URL used by the dashboard.  When left empty (the default in Docker Compose), the dashboard routes API requests through its own nginx proxy.  When running the dashboard outside of Docker, set it to the server's URL (e.g. `http://localhost:8000`).
 
@@ -324,9 +331,41 @@ cd Docker
 docker compose up -d
 ```
 
-The server is available at `http://localhost:8000` and the dashboard at `http://localhost:8001`.
+The server is available at `http://localhost:8000`, the dashboard at `http://localhost:8001`, and Grafana at `http://localhost:3000`.  The dashboard's home page lists every bundled tool with its URL and default credentials on the External Services card; set `GRAFANA_URL`, `PROMETHEUS_URL`, `TEMPO_URL` or `LOKI_URL` on the `crawlsharp-ui` container to change them, or to an empty string to hide one.
 
 Use `docker compose down` (or the provided `compose-down` scripts) to stop.
+
+## Observability
+
+CrawlSharp is instrumented end to end, so an operator can see where a crawl's time went and what failed from Grafana alone.  The full catalog of meters, instruments, labels, spans, configuration keys, dashboards and recommended alerts is in [TELEMETRY.md](TELEMETRY.md).
+
+**Library.**  Subscribe any OpenTelemetry-compatible host to the meter and activity source named `CrawlSharp` (constants in `CrawlSharp.Telemetry.CrawlSharpTelemetry`).  With [Radiant](https://www.nuget.org/packages/Radiant):
+
+```csharp
+RadiantSettings settings = new RadiantSettings("my-crawler");
+settings.Sources.AddMeter(CrawlSharpTelemetry.MeterName);
+settings.Sources.AddActivitySource(CrawlSharpTelemetry.ActivitySourceName);
+
+using (RadiantHost host = RadiantHost.Start(settings))
+{
+    // crawl as usual; every crawl emits a "crawl" trace with page, stage and HTTP client spans
+}
+```
+
+Highlights: `crawlsharp.crawl.jobs` and `crawlsharp.crawl.duration` by outcome, `crawlsharp.crawl.stage.duration` for every stage (`robots`, `sitemap`, `queued`, `fetch`, `politeness_delay`, `retry_backoff`, `link_extraction`, headless stages), `crawlsharp.pages` by outcome and status class, `crawlsharp.links.skipped` by reason, `crawlsharp.integration.requests` and `crawlsharp.integration.duration` for outbound HTTP and Playwright calls, queue, worker-slot and result-buffer gauges, and `crawlsharp.errors` by stage and `error.type`.  Labels are bounded; URLs appear only on spans.
+
+**Server.**  The server enables Watson's built-in HTTP telemetry and runs one Radiant host subscribed to `Watson`, `CrawlSharp` and `CrawlSharp.Server`.  It is configured with environment variables (defaults use `127.0.0.1`):
+
+| Variable | Default |
+|---|---|
+| `CRAWLSHARP_TELEMETRY_ENABLED` | `true` |
+| `CRAWLSHARP_OTLP_ENDPOINT` / `CRAWLSHARP_OTLP_PROTOCOL` | `http://127.0.0.1:4317` / `grpc` |
+| `CRAWLSHARP_PROMETHEUS_ENABLED` / `_HOSTNAME` / `_PORT` | `true` / `127.0.0.1` / `9464` (scrape `/metrics`) |
+| `CRAWLSHARP_LOKI_ENABLED` / `CRAWLSHARP_LOKI_ENDPOINT` | `false` / `http://127.0.0.1:3100/otlp` |
+| `CRAWLSHARP_TRACES_SAMPLING_RATIO` | `1.0` |
+| `CRAWLSHARP_LOG_MINIMUM_SEVERITY` | `2` (information; `1` adds per-URL debug lines) |
+
+**Stack.**  `docker compose up -d` in `Docker/` brings up the server and dashboard with Prometheus (`http://localhost:9090`), Tempo (`http://localhost:3200`), Loki (`http://localhost:3100`) and Grafana (`http://localhost:3000`, `admin` / `admin` for local use only; set `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` anywhere else).  Grafana is provisioned with a **CrawlSharp** folder holding Overview, HTTP, Crawl Pipeline, Integrations, Runtime, and Logs and Traces dashboards (JSON in `assets/grafana/`).
 
 ## Running in Docker
 

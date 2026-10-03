@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'CrawlSharp'
+    orgId: 1
+    folder: 'CrawlSharp'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards/crawlsharp

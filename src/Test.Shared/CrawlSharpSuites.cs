@@ -31,7 +31,9 @@ namespace Test.Shared
                     RedirectSuite.Build(),
                     AuthenticationCrawlSuite.Build(),
                     DomainFilterSuite.Build(),
-                    HeadlessSuite.Build()
+                    HeadlessSuite.Build(),
+                    TelemetrySuite.Build(),
+                    ServerTelemetrySuite.Build()
                 };
             }
         }

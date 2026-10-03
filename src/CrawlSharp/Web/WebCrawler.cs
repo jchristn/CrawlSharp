@@ -3,6 +3,7 @@ namespace CrawlSharp.Web
     using System;
     using System.Collections.Generic;
     using System.Collections.Specialized;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Net;
@@ -13,6 +14,7 @@ namespace CrawlSharp.Web
     using System.Threading.Tasks;
 
     using CrawlSharp.Helpers;
+    using CrawlSharp.Telemetry;
     using HtmlAgilityPack;
     using Microsoft.Playwright;
     using RestWrapper;
@@ -145,6 +147,13 @@ namespace CrawlSharp.Web
         private CancellationToken _Token;
         private Task _QueueProcessor = null;
 
+        private readonly string _Mode;
+        private readonly object _TelemetryLock = new object();
+        private Activity _CrawlActivity = null;
+        private long _CrawlStartTimestamp = 0;
+        private bool _CrawlTelemetryOpen = false;
+        private int _ResourcesYielded = 0;
+
         #endregion
 
         #region Constructors-and-Factories
@@ -165,18 +174,9 @@ namespace CrawlSharp.Web
             _Semaphore = new SemaphoreSlim(_Settings.Crawl.MaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
             _Token = token;
             _DelayMilliseconds = _Settings.Crawl.RequestDelayMs;
+            _Mode = _Settings.Crawl.UseHeadlessBrowser ? CrawlSharpTelemetry.ModeHeadless : CrawlSharpTelemetry.ModeRest;
 
-            if (_Settings.Crawl.UseHeadlessBrowser)
-            {
-                int exitCode = Microsoft.Playwright.Program.Main(new[] { "install", "firefox" });
-                if (exitCode != 0) throw new InvalidOperationException("Unable to install Firefox");
-
-                _IPlaywright = Playwright.CreateAsync().GetAwaiter().GetResult();
-                _IBrowser = _IPlaywright.Firefox.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Headless = true
-                }).GetAwaiter().GetResult();
-            }
+            if (_Settings.Crawl.UseHeadlessBrowser) StartBrowser();
         }
 
         #endregion
@@ -210,6 +210,9 @@ namespace CrawlSharp.Web
                     }
 
                     cts.Dispose();
+
+                    EndCrawlTelemetry(CrawlSharpTelemetry.OutcomeAbandoned, null);
+                    ReleaseTelemetryState();
 
                     _Semaphore?.Dispose();
                     _QueuedLinks?.Clear();
@@ -251,55 +254,74 @@ namespace CrawlSharp.Web
         /// <returns>Enumerable of WebResource objects.</returns>
         public IEnumerable<WebResource> Crawl(HttpMethod method)
         {
-            #region Process-Robots-and-Sitemap
+            BeginCrawlTelemetry();
+            bool completed = false;
+            Exception failure = null;
 
-            Task robotsFile = RetrieveRobotsFile(_Settings.Crawl.StartUrl, _Token);
-            robotsFile.Wait();
-
-            if (_RobotsFile != null)
+            try
             {
-                decimal crawlDelay = _RobotsFile.GetCrawlDelay(_Settings.Crawl.UserAgent);
-                if (crawlDelay > 0)
+                #region Process-Robots-and-Sitemap
+
+                try
                 {
-                    _DelayMilliseconds = (int)(crawlDelay * 1000);
-                    Log("crawl delay set to " + _DelayMilliseconds + "ms per robots.txt");
+                    Task robotsFile = RetrieveRobotsFile(_Settings.Crawl.StartUrl, _Token);
+                    robotsFile.Wait();
+
+                    ApplyRobotsCrawlDelay();
+
+                    Task processSitemap = ProcessSitemap(_Settings.Crawl.StartUrl, _Token);
+                    processSitemap.Wait();
                 }
+                catch (Exception e)
+                {
+                    failure = e;
+                    throw;
+                }
+
+                #endregion
+
+                #region Enqueue-Root-Url
+
+                EnqueueQueuedLink(_Settings.Crawl.StartUrl, null, 0, CrawlSharpTelemetry.LinkSourceStart);
+
+                #endregion
+
+                #region Start-Queue-Processor
+
+                _QueueProcessor = Task.Run(() => QueueProcessor(_Token), _Token);
+
+                while (!_QueueProcessor.IsCompleted)
+                {
+                    Task.Delay(10, _Token).Wait();
+                    WebResource wr = DequeueWebResource();
+                    if (wr != null)
+                    {
+                        Interlocked.Increment(ref _ResourcesYielded);
+                        yield return wr;
+                    }
+                }
+
+                #endregion
+
+                #region Drain-the-Queue
+
+                while (true)
+                {
+                    WebResource wr = DequeueWebResource();
+                    if (wr == null) break;
+                    Interlocked.Increment(ref _ResourcesYielded);
+                    yield return wr;
+                }
+
+                #endregion
+
+                failure = GetQueueProcessorFailure();
+                completed = true;
             }
-
-            Task processSitemap = ProcessSitemap(_Settings.Crawl.StartUrl, _Token);
-            processSitemap.Wait();
-
-            #endregion
-
-            #region Enqueue-Root-Url
-
-            EnqueueQueuedLink(_Settings.Crawl.StartUrl, null, 0);
-
-            #endregion
-
-            #region Start-Queue-Processor
-
-            _QueueProcessor = Task.Run(() => QueueProcessor(_Token), _Token);
-
-            while (!_QueueProcessor.IsCompleted)
+            finally
             {
-                Task.Delay(10, _Token).Wait();
-                WebResource wr = DequeueWebResource();
-                if (wr != null) yield return wr;
+                EndCrawlTelemetry(GetCrawlOutcome(completed, failure, _Token), failure);
             }
-
-            #endregion
-
-            #region Drain-the-Queue
-
-            while (true)
-            {
-                WebResource wr = DequeueWebResource();
-                if (wr == null) break;
-                yield return wr;
-            }
-
-            #endregion
         }
 
         /// <summary>
@@ -309,73 +331,116 @@ namespace CrawlSharp.Web
         /// <returns>Enumerable of WebResource objects.</returns>
         public async IAsyncEnumerable<WebResource> CrawlAsync([EnumeratorCancellation] CancellationToken token = default)
         {
-            #region Process-Robots-and-Sitemap
-
             CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_Token, token);
 
-            await RetrieveRobotsFile(_Settings.Crawl.StartUrl, cts.Token).ConfigureAwait(false);
+            BeginCrawlTelemetry();
+            bool completed = false;
+            Exception failure = null;
 
-            if (_RobotsFile != null)
+            try
             {
-                decimal crawlDelay = _RobotsFile.GetCrawlDelay(_Settings.Crawl.UserAgent);
-                if (crawlDelay > 0)
+                #region Process-Robots-and-Sitemap
+
+                try
                 {
-                    _DelayMilliseconds = (int)(crawlDelay * 1000);
-                    Log("crawl delay set to " + _DelayMilliseconds + "ms per robots.txt");
+                    await RetrieveRobotsFile(_Settings.Crawl.StartUrl, cts.Token).ConfigureAwait(false);
+                    ApplyRobotsCrawlDelay();
+                    await ProcessSitemap(_Settings.Crawl.StartUrl, cts.Token).ConfigureAwait(false);
                 }
+                catch (Exception e)
+                {
+                    failure = e;
+                    throw;
+                }
+
+                #endregion
+
+                #region Enqueue-Root-Url
+
+                EnqueueQueuedLink(_Settings.Crawl.StartUrl, null, 0, CrawlSharpTelemetry.LinkSourceStart);
+
+                #endregion
+
+                #region Start-Queue-Processor
+
+                _QueueProcessor = Task.Run(() => QueueProcessor(cts.Token), cts.Token);
+
+                while (!_QueueProcessor.IsCompleted)
+                {
+                    await Task.Delay(10, cts.Token).ConfigureAwait(false);
+
+                    WebResource wr = DequeueWebResource();
+                    if (wr != null)
+                    {
+                        Interlocked.Increment(ref _ResourcesYielded);
+                        yield return wr;
+                    }
+                }
+
+                #endregion
+
+                #region Drain-the-Queue
+
+                while (true)
+                {
+                    WebResource wr = DequeueWebResource();
+                    if (wr == null) break;
+                    Interlocked.Increment(ref _ResourcesYielded);
+                    yield return wr;
+                }
+
+                #endregion
+
+                failure = GetQueueProcessorFailure();
+                completed = true;
             }
-
-            await ProcessSitemap(_Settings.Crawl.StartUrl, cts.Token).ConfigureAwait(false);
-
-            #endregion
-
-            #region Enqueue-Root-Url
-
-            EnqueueQueuedLink(_Settings.Crawl.StartUrl, null, 0);
-
-            #endregion
-
-            #region Start-Queue-Processor
-
-            _QueueProcessor = Task.Run(() => QueueProcessor(cts.Token), cts.Token);
-
-            while (!_QueueProcessor.IsCompleted)
+            finally
             {
-                await Task.Delay(10, cts.Token).ConfigureAwait(false);
-
-                WebResource wr = DequeueWebResource();
-                if (wr != null) yield return wr;
+                EndCrawlTelemetry(GetCrawlOutcome(completed, failure, cts.Token), failure);
             }
-
-            #endregion
-
-            #region Drain-the-Queue
-
-            while (true)
-            {
-                WebResource wr = DequeueWebResource();
-                if (wr == null) break;
-                yield return wr;
-            }
-
-            #endregion
         }
 
         #endregion
 
         #region Private-Methods
 
-        private async Task DelayForRetry(Uri uri, int attempt, CancellationToken token)
+        private async Task DelayForRetry(Uri uri, int attempt, string service, CancellationToken token)
         {
             int delay = (int)Math.Min(
                 _Settings.Crawl.RetryMinBackoffMs * Math.Pow(2, attempt),
                 _Settings.Crawl.RetryMaxBackoffMs);
 
             if (_Settings.Crawl.RetryBackoffJitter)
-                delay = _RetryJitter.Next(0, delay + 1);
+            {
+                lock (_RetryJitter)
+                {
+                    delay = _RetryJitter.Next(0, delay + 1);
+                }
+            }
 
             Log("429 retry attempt " + (attempt + 1) + "/" + _Settings.Crawl.MaxRetries + " for " + uri + ", backing off " + delay + "ms");
-            await Task.Delay(delay, token).ConfigureAwait(false);
+            CrawlInstruments.RecordRetry(service, CrawlSharpTelemetry.RetryReasonThrottled);
+            await TimedDelay(CrawlSharpTelemetry.StageRetryBackoff, delay, token).ConfigureAwait(false);
+        }
+
+        private async Task TimedDelay(string stage, int delayMs, CancellationToken token)
+        {
+            if (delayMs <= 0) return;
+
+            using (StageScope scope = new StageScope(stage))
+            {
+                scope.SetTag(CrawlSharpTelemetry.AttributeDelayMs, delayMs);
+
+                try
+                {
+                    await Task.Delay(delayMs, token).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    scope.Fail(e);
+                    throw;
+                }
+            }
         }
 
         private async Task DelayIfNeeded(int delayMs, CancellationToken token)
@@ -389,6 +454,228 @@ namespace CrawlSharp.Web
             if (String.IsNullOrEmpty(msg)) return;
             Logger?.Invoke(_Header + msg);
         }
+
+        #region Telemetry
+
+        private ActivityContext CrawlParentContext
+        {
+            get
+            {
+                Activity activity = _CrawlActivity;
+                return activity != null ? activity.Context : default;
+            }
+        }
+
+        private void BeginCrawlTelemetry()
+        {
+            Activity activity;
+
+            lock (_TelemetryLock)
+            {
+                if (_CrawlTelemetryOpen) return;
+                _CrawlTelemetryOpen = true;
+                _ResourcesYielded = 0;
+                _CrawlStartTimestamp = Stopwatch.GetTimestamp();
+                _CrawlActivity = CrawlInstruments.StartDetachedActivity(CrawlSharpTelemetry.SpanCrawl, ActivityKind.Internal);
+                activity = _CrawlActivity;
+            }
+
+            CrawlInstruments.SetTag(activity, CrawlSharpTelemetry.AttributeMode, _Mode);
+            CrawlInstruments.SetUrl(activity, _Settings.Crawl.StartUrl);
+            CrawlInstruments.SetTag(activity, CrawlSharpTelemetry.AttributeMaxDepth, _Settings.Crawl.MaxCrawlDepth);
+            CrawlInstruments.SetTag(activity, CrawlSharpTelemetry.AttributeMaxParallelTasks, _Settings.Crawl.MaxParallelTasks);
+            CrawlInstruments.SetTag(activity, CrawlSharpTelemetry.AttributeFollowLinks, _Settings.Crawl.FollowLinks);
+
+            CrawlInstruments.Add(CrawlInstruments.CrawlActive, 1, CrawlSharpTelemetry.AttributeMode, _Mode);
+            CrawlInstruments.Add(CrawlInstruments.WorkersCapacity, _Settings.Crawl.MaxParallelTasks);
+        }
+
+        private void EndCrawlTelemetry(string outcome, Exception failure)
+        {
+            Activity activity;
+            long startTimestamp;
+
+            lock (_TelemetryLock)
+            {
+                if (!_CrawlTelemetryOpen) return;
+                _CrawlTelemetryOpen = false;
+                activity = _CrawlActivity;
+                startTimestamp = _CrawlStartTimestamp;
+                _CrawlActivity = null;
+            }
+
+            CrawlInstruments.RecordCrawl(_Mode, outcome, CrawlInstruments.ElapsedSeconds(startTimestamp));
+            CrawlInstruments.Add(CrawlInstruments.CrawlActive, -1, CrawlSharpTelemetry.AttributeMode, _Mode);
+            CrawlInstruments.Add(CrawlInstruments.WorkersCapacity, -_Settings.Crawl.MaxParallelTasks);
+
+            CrawlInstruments.SetTag(activity, CrawlSharpTelemetry.AttributeResourceCount, Volatile.Read(ref _ResourcesYielded));
+
+            if (outcome == CrawlSharpTelemetry.OutcomeFailure)
+            {
+                CrawlInstruments.RecordError(CrawlSharpTelemetry.SpanCrawl, failure);
+                CrawlInstruments.SetError(activity, failure);
+            }
+
+            CrawlInstruments.SetOutcomeStatus(activity, outcome);
+            CrawlInstruments.StopActivity(activity, Activity.Current);
+        }
+
+        private static string GetCrawlOutcome(bool completed, Exception failure, CancellationToken token)
+        {
+            if (failure != null)
+            {
+                Exception inner = failure is AggregateException ae && ae.InnerException != null ? ae.InnerException : failure;
+                return inner is OperationCanceledException ? CrawlSharpTelemetry.OutcomeCancelled : CrawlSharpTelemetry.OutcomeFailure;
+            }
+
+            if (completed) return CrawlSharpTelemetry.OutcomeCompleted;
+            if (token.IsCancellationRequested) return CrawlSharpTelemetry.OutcomeCancelled;
+            return CrawlSharpTelemetry.OutcomeAbandoned;
+        }
+
+        private Exception GetQueueProcessorFailure()
+        {
+            Task processor = _QueueProcessor;
+            if (processor == null || !processor.IsFaulted || processor.Exception == null) return null;
+
+            Exception e = processor.Exception.GetBaseException();
+            Exception?.Invoke(_Settings.Crawl.StartUrl, e);
+            Log("queue processor failed" + Environment.NewLine + e.ToString());
+            return e;
+        }
+
+        private void ReleaseTelemetryState()
+        {
+            // Return what this crawler still holds to the process-wide gauges, so a disposed crawler leaves no residue.
+            try
+            {
+                if (_QueuedLinks != null) lock (_QueuedLinksLock) CrawlInstruments.Add(CrawlInstruments.QueueSize, -_QueuedLinks.Count);
+                if (_FinishedLinks != null) lock (_FinishedLinksLock) CrawlInstruments.Add(CrawlInstruments.ResultsBuffered, -_FinishedLinks.Count);
+                if (_VisitedLinks != null) lock (_VisitedLinksLock) CrawlInstruments.Add(CrawlInstruments.VisitedSize, -_VisitedLinks.Count);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private static string GetScopeReasonCode(string reason)
+        {
+            switch (reason)
+            {
+                case "domain is denied": return CrawlSharpTelemetry.ReasonDeniedDomain;
+                case "not in the start URL's root domain": return CrawlSharpTelemetry.ReasonOutsideRootDomain;
+                case "not in the start URL's subdomain": return CrawlSharpTelemetry.ReasonOutsideSubdomain;
+                case "not a child of the start URL": return CrawlSharpTelemetry.ReasonNotChildUrl;
+                case "domain is not in the allowed list": return CrawlSharpTelemetry.ReasonNotAllowedDomain;
+                case "external link": return CrawlSharpTelemetry.ReasonExternal;
+                case "matches an exclusion pattern": return CrawlSharpTelemetry.ReasonExcluded;
+                default: return "out_of_scope";
+            }
+        }
+
+        private static string GetRedirectOutcomeLabel(RedirectOutcomeEnum outcome)
+        {
+            switch (outcome)
+            {
+                case RedirectOutcomeEnum.Followed: return "followed";
+                case RedirectOutcomeEnum.NotFollowed: return "not_followed";
+                case RedirectOutcomeEnum.LoopDetected: return "loop_detected";
+                case RedirectOutcomeEnum.MaxRedirectsExceeded: return "max_redirects_exceeded";
+                case RedirectOutcomeEnum.OutOfScope: return "out_of_scope";
+                case RedirectOutcomeEnum.RobotsDisallowed: return "robots_disallowed";
+                case RedirectOutcomeEnum.MissingLocation: return "missing_location";
+                case RedirectOutcomeEnum.InvalidLocation: return "invalid_location";
+                default: return "none";
+            }
+        }
+
+        private void RecordPageResult(WebResource wr)
+        {
+            bool isContent = wr.RedirectOutcome == RedirectOutcomeEnum.None || wr.RedirectOutcome == RedirectOutcomeEnum.Followed;
+            string outcome;
+
+            if (!isContent) outcome = CrawlSharpTelemetry.OutcomeRedirectStopped;
+            else if (wr.Status >= 400) outcome = CrawlSharpTelemetry.OutcomeHttpError;
+            else if (wr.Status < 100) outcome = CrawlSharpTelemetry.OutcomeFailure;
+            else outcome = CrawlSharpTelemetry.OutcomeSuccess;
+
+            CrawlInstruments.RecordPage(_Mode, outcome, wr.Status, wr.Data != null ? wr.Data.LongLength : 0);
+
+            int hops = wr.RedirectChain != null ? wr.RedirectChain.Count : 0;
+            if (wr.RedirectOutcome != RedirectOutcomeEnum.None || hops > 0)
+                CrawlInstruments.RecordRedirect(GetRedirectOutcomeLabel(wr.RedirectOutcome), hops);
+        }
+
+        private void StartBrowser()
+        {
+            using (StageScope stage = new StageScope(CrawlSharpTelemetry.StageBrowserStartup))
+            {
+                try
+                {
+                    using (IntegrationScope install = new IntegrationScope(CrawlSharpTelemetry.ServicePlaywright, CrawlSharpTelemetry.OperationInstall))
+                    {
+                        int exitCode;
+
+                        try
+                        {
+                            exitCode = Microsoft.Playwright.Program.Main(new[] { "install", "firefox" });
+                        }
+                        catch (Exception e)
+                        {
+                            install.Fail(e);
+                            throw;
+                        }
+
+                        if (exitCode != 0)
+                        {
+                            InvalidOperationException ioe = new InvalidOperationException("Unable to install Firefox");
+                            install.Fail(ioe);
+                            throw ioe;
+                        }
+
+                        install.SetOutcome(CrawlSharpTelemetry.OutcomeSuccess);
+                    }
+
+                    using (IntegrationScope launch = new IntegrationScope(CrawlSharpTelemetry.ServicePlaywright, CrawlSharpTelemetry.OperationLaunch))
+                    {
+                        try
+                        {
+                            _IPlaywright = Playwright.CreateAsync().GetAwaiter().GetResult();
+                            _IBrowser = _IPlaywright.Firefox.LaunchAsync(new BrowserTypeLaunchOptions
+                            {
+                                Headless = true
+                            }).GetAwaiter().GetResult();
+
+                            launch.SetOutcome(CrawlSharpTelemetry.OutcomeSuccess);
+                        }
+                        catch (Exception e)
+                        {
+                            launch.Fail(e);
+                            throw;
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    stage.Fail(e);
+                    throw;
+                }
+            }
+        }
+
+        private void ApplyRobotsCrawlDelay()
+        {
+            if (_RobotsFile == null) return;
+
+            decimal crawlDelay = _RobotsFile.GetCrawlDelay(_Settings.Crawl.UserAgent);
+            if (crawlDelay > 0)
+            {
+                _DelayMilliseconds = (int)(crawlDelay * 1000);
+                Log("crawl delay set to " + _DelayMilliseconds + "ms per robots.txt");
+            }
+        }
+
+        #endregion
 
         private bool IsAutoExpandEnabled(string contentType)
         {
@@ -604,8 +891,18 @@ namespace CrawlSharp.Web
 
             while (true)
             {
+                bool retry = false;
+                bool throttled = false;
+
+                // The client span and integration latency cover the request and the body only; backoff and throttle
+                // delays run after it closes and are recorded as their own stages.
+                using (IntegrationScope call = new IntegrationScope(CrawlSharpTelemetry.ServiceHttp, method.Method))
                 using (HttpRequestMessage message = new HttpRequestMessage(method, uri))
                 {
+                    call.SetTag(CrawlSharpTelemetry.AttributeHttpMethod, method.Method);
+                    call.SetTag(CrawlSharpTelemetry.AttributeRetryAttempt, attempt);
+                    CrawlInstruments.SetUrl(call.Activity, uri);
+
                     message.Headers.TryAddWithoutValidation("User-Agent", _Settings.Crawl.UserAgent);
 
                     string credentialName;
@@ -613,10 +910,22 @@ namespace CrawlSharp.Web
                     if (IsInCredentialScope(uri) && TryGetCredentialHeader(out credentialName, out credentialValue))
                         message.Headers.TryAddWithoutValidation(credentialName, credentialValue);
 
-                    HttpResponseMessage response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+                    HttpResponseMessage response;
+
+                    try
+                    {
+                        response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+                    }
+                    catch (Exception e)
+                    {
+                        call.Fail(e, token);
+                        throw;
+                    }
 
                     using (RestResponse resp = new RestResponse(response))
                     {
+                        call.SetStatus(resp.StatusCode);
+
                         if (attempt == 0)
                         {
                             result.RequestedUris.Add(uri);
@@ -627,29 +936,45 @@ namespace CrawlSharp.Web
                         {
                             Log("throttle status 429 for " + uri);
 
-                            if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries)
-                            {
-                                await DelayForRetry(uri, attempt, token).ConfigureAwait(false);
-                                attempt++;
-                                continue;
-                            }
-
-                            if (_Settings.Crawl.ThrottleMs > 0)
-                                await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                            if (_Settings.Crawl.RetryOn429 && attempt < _Settings.Crawl.MaxRetries) retry = true;
+                            else throttled = true;
                         }
                         else
                         {
                             Log("status " + resp.StatusCode + " for URL " + uri);
                         }
 
-                        result.Status = resp.StatusCode;
-                        result.Headers = resp.Headers;
-                        result.MediaType = response.Content?.Headers?.ContentType?.MediaType?.ToLowerInvariant();
-                        result.ETag = GetEtag(resp);
-                        result.Data = method == HttpMethod.Head ? null : await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
-                        return;
+                        if (!retry)
+                        {
+                            result.Status = resp.StatusCode;
+                            result.Headers = resp.Headers;
+                            result.MediaType = response.Content?.Headers?.ContentType?.MediaType?.ToLowerInvariant();
+                            result.ETag = GetEtag(resp);
+
+                            try
+                            {
+                                result.Data = method == HttpMethod.Head ? null : await ReadResponseBytesAsync(resp, token).ConfigureAwait(false);
+                            }
+                            catch (Exception e)
+                            {
+                                call.Fail(e, token);
+                                throw;
+                            }
+
+                            if (result.Data != null) call.SetTag(CrawlSharpTelemetry.AttributePageSize, result.Data.LongLength);
+                        }
                     }
                 }
+
+                if (retry)
+                {
+                    await DelayForRetry(uri, attempt, CrawlSharpTelemetry.ServiceHttp, token).ConfigureAwait(false);
+                    attempt++;
+                    continue;
+                }
+
+                if (throttled) await TimedDelay(CrawlSharpTelemetry.StageThrottleDelay, _Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                return;
             }
         }
 
@@ -713,6 +1038,7 @@ namespace CrawlSharp.Web
         {
             lock (_VisitedLinksLock)
             {
+                int countBefore = _VisitedLinks.Count;
                 WebResource winner = resource;
 
                 if (final != null && !final.Equals(requested))
@@ -739,6 +1065,7 @@ namespace CrawlSharp.Web
                 }
 
                 _VisitedLinks[requested] = winner;
+                CrawlInstruments.Add(CrawlInstruments.VisitedSize, _VisitedLinks.Count - countBefore);
                 return winner;
             }
         }
@@ -801,31 +1128,65 @@ namespace CrawlSharp.Web
                     downloadInitiated = true;
                 };
 
+                CrawlInstruments.Add(CrawlInstruments.BrowserContextsActive, 1);
+
                 try
                 {
                     IResponse response = null;
+                    bool downloadStarted = false;
+                    PlaywrightException loopError = null;
 
-                    try
+                    // The navigate span covers the browser navigation only; fallbacks to the REST client run after it closes.
+                    using (IntegrationScope navigate = new IntegrationScope(CrawlSharpTelemetry.ServicePlaywright, CrawlSharpTelemetry.OperationNavigate))
                     {
-                        response = await page.GotoAsync(navigateUri.ToString(), new PageGotoOptions
+                        CrawlInstruments.SetUrl(navigate.Activity, navigateUri);
+                        navigate.SetTag(CrawlSharpTelemetry.AttributeRetryAttempt, attempt);
+
+                        try
                         {
-                            WaitUntil = WaitUntilState.Load,
-                            Timeout = _Settings.Crawl.PageTimeoutMs
-                        }).ConfigureAwait(false);
+                            response = await page.GotoAsync(navigateUri.ToString(), new PageGotoOptions
+                            {
+                                WaitUntil = WaitUntilState.Load,
+                                Timeout = _Settings.Crawl.PageTimeoutMs
+                            }).ConfigureAwait(false);
+
+                            if (navigationRedirected) navigate.SetOutcome(CrawlSharpTelemetry.OutcomeRedirected);
+                            else if (response != null) navigate.SetStatus(response.Status);
+                            else navigate.SetOutcome(CrawlSharpTelemetry.OutcomeSuccess);
+                        }
+                        catch (PlaywrightException) when (navigationRedirected)
+                        {
+                            // The route handler aborted the navigation because it redirected; handled below.
+                            navigate.SetOutcome(CrawlSharpTelemetry.OutcomeRedirected);
+                        }
+                        catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
+                        {
+                            navigate.SetOutcome(CrawlSharpTelemetry.OutcomeDownload);
+                            downloadStarted = true;
+                        }
+                        catch (PlaywrightException ex) when (IsRedirectLoopError(ex))
+                        {
+                            navigate.Fail(ex, token);
+                            loopError = ex;
+                        }
+                        catch (Exception e)
+                        {
+                            navigate.Fail(e, token);
+                            throw;
+                        }
                     }
-                    catch (PlaywrightException) when (navigationRedirected)
-                    {
-                        // The route handler aborted the navigation because it redirected; handled below.
-                    }
-                    catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
+
+                    if (downloadStarted)
                     {
                         // Download was triggered, fall back to REST client
                         Log("download triggered for " + navigateUri + ", using REST client");
                         return await RetrieveWithRestClient(requestedUri, parentUrl, depth, contentType, sameHostOnly, token).ConfigureAwait(false);
                     }
-                    catch (PlaywrightException ex) when (IsRedirectLoopError(ex))
+
+                    if (loopError != null)
                     {
                         // Report the page instead of letting the navigation error drop it from the results.
+                        PlaywrightException ex = loopError;
                         Log("browser reported a redirect loop for " + navigateUri + ": " + ex.Message);
 
                         WebResource looped = new WebResource
@@ -891,13 +1252,12 @@ namespace CrawlSharp.Web
                             if (page != null && !page.IsClosed)
                                 await page.CloseAsync().ConfigureAwait(false);
 
-                            await DelayForRetry(navigateUri, attempt, token).ConfigureAwait(false);
+                            await DelayForRetry(navigateUri, attempt, CrawlSharpTelemetry.ServicePlaywright, token).ConfigureAwait(false);
                             attempt++;
                             continue;
                         }
 
-                        if (_Settings.Crawl.ThrottleMs > 0)
-                            await Task.Delay(_Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
+                        await TimedDelay(CrawlSharpTelemetry.StageThrottleDelay, _Settings.Crawl.ThrottleMs, token).ConfigureAwait(false);
                     }
                     else
                     {
@@ -984,7 +1344,18 @@ namespace CrawlSharp.Web
                             await DelayIfNeeded(_Settings.Crawl.PostLoadDelayMs, token).ConfigureAwait(false);
                         }
 
-                        await ExpandCollapsibleContent(page, navigateUri, token).ConfigureAwait(false);
+                        using (StageScope expand = new StageScope(CrawlSharpTelemetry.StageAutoExpand))
+                        {
+                            try
+                            {
+                                await ExpandCollapsibleContent(page, navigateUri, token).ConfigureAwait(false);
+                            }
+                            catch (Exception e)
+                            {
+                                expand.Fail(e);
+                                throw;
+                            }
+                        }
                     }
                     else
                     {
@@ -1015,6 +1386,8 @@ namespace CrawlSharp.Web
                 }
                 finally
                 {
+                    CrawlInstruments.Add(CrawlInstruments.BrowserContextsActive, -1);
+
                     if (page != null && !page.IsClosed)
                     {
                         await page.CloseAsync().ConfigureAwait(false);
@@ -1050,12 +1423,29 @@ namespace CrawlSharp.Web
 
             try
             {
-                IAPIResponse fetched = await route.FetchAsync(new RouteFetchOptions
+                IAPIResponse fetched;
+
+                using (IntegrationScope call = new IntegrationScope(CrawlSharpTelemetry.ServicePlaywright, CrawlSharpTelemetry.OperationRouteFetch))
                 {
-                    Headers = headers,
-                    MaxRedirects = 0,
-                    Timeout = _Settings.Crawl.PageTimeoutMs
-                }).ConfigureAwait(false);
+                    CrawlInstruments.SetUrl(call.Activity, uri);
+
+                    try
+                    {
+                        fetched = await route.FetchAsync(new RouteFetchOptions
+                        {
+                            Headers = headers,
+                            MaxRedirects = 0,
+                            Timeout = _Settings.Crawl.PageTimeoutMs
+                        }).ConfigureAwait(false);
+
+                        call.SetStatus(fetched.Status);
+                    }
+                    catch (Exception e)
+                    {
+                        call.Fail(e);
+                        throw;
+                    }
+                }
 
                 string location;
                 fetched.Headers.TryGetValue("location", out location);
@@ -1122,16 +1512,34 @@ namespace CrawlSharp.Web
             return builder.Uri;
         }
 
-        private async Task<WebResource> RetrieveWebResource(string url, string parentUrl, int depth, bool sameHostOnly, CancellationToken token = default)
+        private async Task<WebResource> RetrieveWebResource(string url, string parentUrl, int depth, bool sameHostOnly, string purpose, CancellationToken token = default)
         {
+            // The politeness delay is its own stage, so fetch latency measures retrieval only.
+            await Pause(token).ConfigureAwait(false);
+
+            using (StageScope stage = new StageScope(CrawlSharpTelemetry.StageFetch))
+            {
+                return await RetrieveWebResource(url, parentUrl, depth, sameHostOnly, purpose, stage, token).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Retrieve one URL within a caller-owned fetch stage, whose outcome tells a null result's cause (skipped, failed, cancelled).
+        /// </summary>
+        private async Task<WebResource> RetrieveWebResource(string url, string parentUrl, int depth, bool sameHostOnly, string purpose, StageScope stage, CancellationToken token)
+        {
+            bool isPage = purpose == CrawlSharpTelemetry.PurposePage;
+
+            stage.SetTag(CrawlSharpTelemetry.AttributePurpose, purpose);
+            stage.SetTag(CrawlSharpTelemetry.AttributeDepth, depth);
+
             try
             {
-                await Pause(token).ConfigureAwait(false);
-
                 string fullUrl = NormalizeUrl(_Settings.Crawl.StartUrl, url);
                 if (String.IsNullOrEmpty(fullUrl))
                 {
                     Log("invalid URL " + url);
+                    SkipFetch(stage, isPage, CrawlSharpTelemetry.ReasonInvalidUrl);
                     return null;
                 }
 
@@ -1139,6 +1547,7 @@ namespace CrawlSharp.Web
                     !fullUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
                     Log($"URL does not start with http/https: {fullUrl} (original: {url})");
+                    SkipFetch(stage, isPage, CrawlSharpTelemetry.ReasonNonHttp);
                     return null;
                 }
 
@@ -1151,46 +1560,79 @@ namespace CrawlSharp.Web
                 {
                     Exception?.Invoke(fullUrl, ufe);
                     Log("invalid URI format " + fullUrl);
+                    SkipFetch(stage, isPage, CrawlSharpTelemetry.ReasonInvalidUrl);
                     return null;
                 }
+
+                CrawlInstruments.SetUrl(stage.Activity, normalizedUri);
 
                 if (IsAlreadyVisited(normalizedUri))
                 {
                     Log("already visited " + normalizedUri);
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeSkipped);
                     return GetAlreadyVisited(normalizedUri);
                 }
 
                 if (!_RobotsFile.IsPathAllowed(_Settings.Crawl.UserAgent, normalizedUri.AbsolutePath))
                 {
                     Log("crawl of " + normalizedUri + " prohibited by robots.txt");
+                    SkipFetch(stage, isPage, CrawlSharpTelemetry.ReasonRobotsDisallowed);
                     return null;
                 }
 
                 Log("retrieving " + normalizedUri);
 
-                if (_Settings.Crawl.UseHeadlessBrowser)
-                    return await RetrieveHeadless(normalizedUri, parentUrl, depth, sameHostOnly, token).ConfigureAwait(false);
+                WebResource resource;
 
-                return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, null, sameHostOnly, token).ConfigureAwait(false);
+                if (_Settings.Crawl.UseHeadlessBrowser)
+                    resource = await RetrieveHeadless(normalizedUri, parentUrl, depth, sameHostOnly, token).ConfigureAwait(false);
+                else
+                    resource = await RetrieveWithRestClient(normalizedUri, parentUrl, depth, null, sameHostOnly, token).ConfigureAwait(false);
+
+                if (resource != null)
+                {
+                    stage.SetTag(CrawlSharpTelemetry.AttributeHttpStatusCode, resource.Status);
+                    stage.SetTag(CrawlSharpTelemetry.AttributeRedirectOutcome, GetRedirectOutcomeLabel(resource.RedirectOutcome));
+                    stage.SetTag(CrawlSharpTelemetry.AttributeRedirectHops, resource.RedirectChain != null ? resource.RedirectChain.Count : 0);
+                }
+
+                return resource;
             }
             catch (IOException ioe)
             {
+                FailFetch(stage, isPage, ioe);
                 Exception?.Invoke(url, ioe);
                 Log("IO exception while retrieving URL " + url + Environment.NewLine + ioe.ToString());
                 return null;
             }
             catch (HttpRequestException hre)
             {
+                FailFetch(stage, isPage, hre);
                 Exception?.Invoke(url, hre);
                 Log("HTTP request exception while retrieving URL " + url + Environment.NewLine + hre.ToString());
                 return null;
             }
             catch (Exception e)
             {
+                FailFetch(stage, isPage, e);
                 Exception?.Invoke(url, e);
                 Log("error processing URL " + url + Environment.NewLine + e.ToString());
                 return null;
             }
+        }
+
+        private void SkipFetch(StageScope stage, bool isPage, string reason)
+        {
+            stage.SetOutcome(CrawlSharpTelemetry.OutcomeSkipped);
+            stage.SetTag(CrawlSharpTelemetry.AttributeReason, reason);
+            if (isPage) CrawlInstruments.RecordSkipped(reason);
+        }
+
+        private void FailFetch(StageScope stage, bool isPage, Exception e)
+        {
+            stage.Fail(e);
+            if (isPage && !(e is OperationCanceledException))
+                CrawlInstruments.RecordPage(_Mode, CrawlSharpTelemetry.OutcomeFailure, 0, -1);
         }
 
         private async Task<WebResource> RetrieveHeadless(Uri normalizedUri, string parentUrl, int depth, bool sameHostOnly, CancellationToken token)
@@ -1199,18 +1641,24 @@ namespace CrawlSharp.Web
             // loop detection, scope rules and credential scope as every other request, and non-navigable content is downloaded directly.
             ResolvedResponse check = null;
 
-            try
+            using (StageScope stage = new StageScope(CrawlSharpTelemetry.StageContentTypeCheck))
             {
-                check = await ResolveAsync(normalizedUri, HttpMethod.Head, sameHostOnly, token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception e)
-            {
-                // Some servers reject HEAD outright; navigate to the requested URL as before.
-                Log("content type check failed for " + normalizedUri + ": " + e.Message);
+                try
+                {
+                    check = await ResolveAsync(normalizedUri, HttpMethod.Head, sameHostOnly, token).ConfigureAwait(false);
+                    stage.SetTag(CrawlSharpTelemetry.AttributeHttpStatusCode, check.Status);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeCancelled);
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    // Some servers reject HEAD outright; navigate to the requested URL as before.
+                    stage.Fail(e);
+                    Log("content type check failed for " + normalizedUri + ": " + e.Message);
+                }
             }
 
             if (check != null)
@@ -1246,7 +1694,20 @@ namespace CrawlSharp.Web
             }
 
             if (contentInfo.IsNavigable)
-                return await RetrieveWithPlaywright(normalizedUri, contentInfo.CheckSucceeded ? check : null, parentUrl, depth, contentInfo.MediaType, sameHostOnly, token).ConfigureAwait(false);
+            {
+                using (StageScope stage = new StageScope(CrawlSharpTelemetry.StageBrowserNavigate))
+                {
+                    try
+                    {
+                        return await RetrieveWithPlaywright(normalizedUri, contentInfo.CheckSucceeded ? check : null, parentUrl, depth, contentInfo.MediaType, sameHostOnly, token).ConfigureAwait(false);
+                    }
+                    catch (Exception e)
+                    {
+                        stage.Fail(e);
+                        throw;
+                    }
+                }
+            }
 
             return await RetrieveWithRestClient(normalizedUri, parentUrl, depth, contentInfo.MediaType, sameHostOnly, token).ConfigureAwait(false);
         }
@@ -1267,111 +1728,154 @@ namespace CrawlSharp.Web
 
         private async Task RetrieveRobotsFile(string baseUrl, CancellationToken token = default)
         {
-            if (_Settings.Crawl.IgnoreRobotsText)
+            using (StageScope stage = new StageScope(CrawlSharpTelemetry.StageRobots, CrawlParentContext))
             {
-                Log("skipping retrieval and processing of robots.txt due to settings");
-                return;
-            }
+                if (_Settings.Crawl.IgnoreRobotsText)
+                {
+                    Log("skipping retrieval and processing of robots.txt due to settings");
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeSkipped);
+                    return;
+                }
 
-            if (String.IsNullOrEmpty(baseUrl)) return;
+                if (String.IsNullOrEmpty(baseUrl))
+                {
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeSkipped);
+                    return;
+                }
 
-            // CHANGE: Use domain root instead of the starting URL
-            string domainRoot = GetDomainRoot(baseUrl);
-            string robotsFile = domainRoot + "/robots.txt";
+                // CHANGE: Use domain root instead of the starting URL
+                string domainRoot = GetDomainRoot(baseUrl);
+                string robotsFile = domainRoot + "/robots.txt";
 
-            WebResource robots = await RetrieveWebResource(robotsFile, baseUrl, 0, true, token).ConfigureAwait(false);
-            if (robots != null
-                && robots.Status >= 200
-                && robots.Status <= 299
-                && robots.Data != null)
-            {
+                WebResource robots;
+
                 try
                 {
-                    _RobotsFile = new RobotsFile(robots.Data);
-                    Log("robots file retrieved and processed from " + robotsFile);
+                    robots = await RetrieveWebResource(robotsFile, baseUrl, 0, true, CrawlSharpTelemetry.PurposeRobots, token).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
-                    Exception?.Invoke(robotsFile, e);
-                    Log("error parsing contents from robots file " + robotsFile + Environment.NewLine + Encoding.UTF8.GetString(robots.Data));
+                    stage.Fail(e);
+                    throw;
                 }
-            }
-            else
-            {
-                Log("unable to retrieve robots.txt from " + robotsFile);
+
+                if (robots != null
+                    && robots.Status >= 200
+                    && robots.Status <= 299
+                    && robots.Data != null)
+                {
+                    try
+                    {
+                        _RobotsFile = new RobotsFile(robots.Data);
+                        Log("robots file retrieved and processed from " + robotsFile);
+                    }
+                    catch (Exception e)
+                    {
+                        stage.Fail(e);
+                        Exception?.Invoke(robotsFile, e);
+                        Log("error parsing contents from robots file " + robotsFile + Environment.NewLine + Encoding.UTF8.GetString(robots.Data));
+                    }
+                }
+                else
+                {
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeNotFound);
+                    Log("unable to retrieve robots.txt from " + robotsFile);
+                }
             }
         }
 
         private async Task ProcessSitemap(string baseUrl, CancellationToken token = default)
         {
-            if (!_Settings.Crawl.IncludeSitemap)
+            using (StageScope stage = new StageScope(CrawlSharpTelemetry.StageSitemap, CrawlParentContext))
             {
-                Log("skipping retrieval and processing of sitemap.xml due to settings");
-                return;
-            }
+                if (!_Settings.Crawl.IncludeSitemap)
+                {
+                    Log("skipping retrieval and processing of sitemap.xml due to settings");
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeSkipped);
+                    return;
+                }
 
-            if (String.IsNullOrEmpty(baseUrl)) return;
+                if (String.IsNullOrEmpty(baseUrl))
+                {
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeSkipped);
+                    return;
+                }
 
-            // CHANGE: Use domain root instead of the starting URL
-            string domainRoot = GetDomainRoot(baseUrl);
-            string sitemapUrl = domainRoot + "/sitemap.xml";
+                // CHANGE: Use domain root instead of the starting URL
+                string domainRoot = GetDomainRoot(baseUrl);
+                string sitemapUrl = domainRoot + "/sitemap.xml";
 
-            WebResource sitemap = await RetrieveWebResource(sitemapUrl, baseUrl, 0, true, token).ConfigureAwait(false);
-            if (sitemap != null
-                && sitemap.Status >= 200
-                && sitemap.Status <= 299
-                && sitemap.Data != null)
-            {
+                WebResource sitemap;
+
                 try
                 {
-                    string sitemapData = Encoding.UTF8.GetString(sitemap.Data);
-                    if (SitemapParser.IsParseable(sitemapData))
-                    {
-                        if (!SitemapParser.IsSitemapIndex(sitemapData))
-                        {
-                            List<SitemapUrl> urls = SitemapParser.ParseSitemap(sitemapData);
-                            if (urls != null && urls.Count > 0)
-                            {
-                                Log("including " + urls.Count + " URLs from sitemap.xml");
+                    sitemap = await RetrieveWebResource(sitemapUrl, baseUrl, 0, true, CrawlSharpTelemetry.PurposeSitemap, token).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    stage.Fail(e);
+                    throw;
+                }
 
-                                foreach (SitemapUrl url in urls)
+                if (sitemap != null
+                    && sitemap.Status >= 200
+                    && sitemap.Status <= 299
+                    && sitemap.Data != null)
+                {
+                    try
+                    {
+                        string sitemapData = Encoding.UTF8.GetString(sitemap.Data);
+                        if (SitemapParser.IsParseable(sitemapData))
+                        {
+                            if (!SitemapParser.IsSitemapIndex(sitemapData))
+                            {
+                                List<SitemapUrl> urls = SitemapParser.ParseSitemap(sitemapData);
+                                if (urls != null && urls.Count > 0)
                                 {
-                                    if (String.IsNullOrEmpty(url.Location)) continue;
-                                    EnqueueQueuedLink(url.Location, sitemapUrl, 0);
-                                    Log("queuing URL from sitemap: " + url.Location);
+                                    Log("including " + urls.Count + " URLs from sitemap.xml");
+                                    CrawlInstruments.Add(CrawlInstruments.SitemapUrls, urls.Count);
+                                    stage.SetTag(CrawlSharpTelemetry.AttributeLinkCount, urls.Count);
+
+                                    foreach (SitemapUrl url in urls)
+                                    {
+                                        if (String.IsNullOrEmpty(url.Location)) continue;
+                                        EnqueueQueuedLink(url.Location, sitemapUrl, 0, CrawlSharpTelemetry.LinkSourceSitemap);
+                                        Log("queuing URL from sitemap: " + url.Location);
+                                    }
+                                }
+                                else
+                                {
+                                    Log("no URLs found in sitemap.xml");
                                 }
                             }
                             else
                             {
-                                Log("no URLs found in sitemap.xml");
+                                Log("sitemap.xml contains a sitemap index and in unable to be parsed");
                             }
                         }
                         else
                         {
-                            Log("sitemap.xml contains a sitemap index and in unable to be parsed");
+                            Log("sitemap.xml is not parseable, skipping");
                         }
                     }
-                    else
+                    catch (Exception e)
                     {
-                        Log("sitemap.xml is not parseable, skipping");
+                        stage.Fail(e);
+                        Exception?.Invoke(sitemapUrl, e);
+                        Log("error parsing contents from sitemap.xml file " + sitemapUrl + Environment.NewLine + Encoding.UTF8.GetString(sitemap.Data));
                     }
                 }
-                catch (Exception e)
+                else
                 {
-                    Exception?.Invoke(sitemapUrl, e);
-                    Log("error parsing contents from sitemap.xml file " + sitemapUrl + Environment.NewLine + Encoding.UTF8.GetString(sitemap.Data));
+                    stage.SetOutcome(CrawlSharpTelemetry.OutcomeNotFound);
+                    Log("unable to retrieve sitemap.xml from " + sitemapUrl);  // CHANGE: Fixed log message
                 }
-            }
-            else
-            {
-                Log("unable to retrieve sitemap.xml from " + sitemapUrl);  // CHANGE: Fixed log message
             }
         }
 
         private async Task Pause(CancellationToken token = default)
         {
-            if (_DelayMilliseconds == 0) return;
-            await Task.Delay(_DelayMilliseconds, token).ConfigureAwait(false);
+            await TimedDelay(CrawlSharpTelemetry.StagePolitenessDelay, _DelayMilliseconds, token).ConfigureAwait(false);
         }
 
         private async Task ExpandCollapsibleContent(IPage page, Uri normalizedUri, CancellationToken token)
@@ -1394,6 +1898,10 @@ namespace CrawlSharp.Web
                 int builtInClicks = await ExpandBuiltInTargets(page, token).ConfigureAwait(false);
                 int customClicks = await ExpandCustomSelectors(page, token).ConfigureAwait(false);
                 int totalChanges = detailsOpened + builtInClicks + customClicks;
+
+                CrawlInstruments.Add(CrawlInstruments.AutoExpandChanges, detailsOpened, CrawlSharpTelemetry.AttributeAutoExpandKind, CrawlSharpTelemetry.AutoExpandDetails);
+                CrawlInstruments.Add(CrawlInstruments.AutoExpandChanges, builtInClicks, CrawlSharpTelemetry.AttributeAutoExpandKind, CrawlSharpTelemetry.AutoExpandBuiltIn);
+                CrawlInstruments.Add(CrawlInstruments.AutoExpandChanges, customClicks, CrawlSharpTelemetry.AttributeAutoExpandKind, CrawlSharpTelemetry.AutoExpandCustom);
 
                 Log("auto-expand pass " + (pass + 1) + "/" + _Settings.Crawl.MaxExpansionPasses
                     + " for " + normalizedUri
@@ -2064,8 +2572,10 @@ namespace CrawlSharp.Web
             }
         }
 
-        private void EnqueueQueuedLink(string url, string parentUrl, int depth)
+        private bool EnqueueQueuedLink(string url, string parentUrl, int depth, string source)
         {
+            bool added = false;
+
             lock (_QueuedLinksLock)
             {
                 if (!_QueuedLinks.Any(q => q.Url.Equals(url)))
@@ -2076,17 +2586,36 @@ namespace CrawlSharp.Web
                         ParentUrl = parentUrl,
                         Depth = depth
                     });
+
+                    added = true;
                 }
             }
+
+            if (added)
+            {
+                CrawlInstruments.Add(CrawlInstruments.QueueSize, 1);
+                CrawlInstruments.Add(CrawlInstruments.LinksEnqueued, 1, CrawlSharpTelemetry.AttributeLinkSource, source);
+            }
+            else
+            {
+                CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonAlreadyQueued);
+            }
+
+            return added;
         }
 
         private QueuedLink DequeueQueuedLink()
         {
+            QueuedLink link;
+
             lock (_QueuedLinksLock)
             {
                 if (_QueuedLinks.Count < 1) return null;
-                return _QueuedLinks.Dequeue();
+                link = _QueuedLinks.Dequeue();
             }
+
+            CrawlInstruments.Add(CrawlInstruments.QueueSize, -1);
+            return link;
         }
 
         private bool AddProcessingLink(QueuedLink queuedLink)
@@ -2124,6 +2653,8 @@ namespace CrawlSharp.Web
             {
                 _FinishedLinks.Enqueue(wr);
             }
+
+            CrawlInstruments.Add(CrawlInstruments.ResultsBuffered, 1);
         }
 
         private bool TryMarkYielded(WebResource wr)
@@ -2136,11 +2667,16 @@ namespace CrawlSharp.Web
 
         private WebResource DequeueWebResource()
         {
+            WebResource wr;
+
             lock (_FinishedLinksLock)
             {
                 if (_FinishedLinks.Count < 1) return null;
-                return _FinishedLinks.Dequeue();
+                wr = _FinishedLinks.Dequeue();
             }
+
+            CrawlInstruments.Add(CrawlInstruments.ResultsBuffered, -1);
+            return wr;
         }
 
         private async Task QueueProcessor(CancellationToken token = default)
@@ -2171,6 +2707,7 @@ namespace CrawlSharp.Web
                         if (IsAlreadyVisited(uri))
                         {
                             Log("skipping already visited link " + link.Url);
+                            CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonAlreadyVisited);
                             continue;
                         }
                     }
@@ -2178,12 +2715,14 @@ namespace CrawlSharp.Web
                     {
                         Exception?.Invoke(link.Url, ufe);
                         Log("invalid URI format " + link.Url + ", skipping");
+                        CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonInvalidUrl);
                         continue;
                     }
 
                     if (!AddProcessingLink(link))
                     {
                         Log("skipping link " + link.Url + ", already in processing");
+                        CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonInProcessing);
                         continue;
                     }
 
@@ -2213,61 +2752,108 @@ namespace CrawlSharp.Web
 
         private async Task QueueProcessorInternal(QueuedLink link, CancellationToken token)
         {
+            // Each queued link is its own span under the crawl root.  The parent is explicit because this work runs on the
+            // queue processor's task, not on the flow that enumerates the crawl.
+            Activity previous = Activity.Current;
+            Activity pageActivity = CrawlInstruments.StartActivity(CrawlSharpTelemetry.SpanPage, ActivityKind.Internal, CrawlParentContext);
+            CrawlInstruments.SetUrl(pageActivity, link.Url);
+            CrawlInstruments.SetTag(pageActivity, CrawlSharpTelemetry.AttributeDepth, link.Depth);
+
+            string pageOutcome = CrawlSharpTelemetry.OutcomeSkipped;
+            bool acquired = false;
+
             try
             {
-                await _Semaphore.WaitAsync(token).ConfigureAwait(false);
-
-                try
+                using (StageScope queued = new StageScope(CrawlSharpTelemetry.StageQueued))
                 {
-                    Log("processing queued link " + link.Url + " parent " + (!String.IsNullOrEmpty(link.ParentUrl) ? link.ParentUrl : ".") + " depth " + link.Depth);
-
-                    string normalizedUrl = NormalizeUrl(_Settings.Crawl.StartUrl, link.Url);
-                    if (string.IsNullOrEmpty(normalizedUrl))
-                    {
-                        Log($"unable to normalize queued link {link.Url}");
-                        return;
-                    }
-
-                    link.Url = normalizedUrl;
-
-                    Uri uri;
                     try
                     {
-                        uri = new Uri(link.Url);
-                        if (IsAlreadyVisited(uri))
-                        {
-                            Log("already visited link " + link.Url);
-                            return;
-                        }
+                        await _Semaphore.WaitAsync(token).ConfigureAwait(false);
+                        acquired = true;
                     }
-                    catch (UriFormatException)
+                    catch (Exception e)
                     {
-                        Log($"invalid URI format for normalized URL: {link.Url}");
+                        queued.Fail(e);
+                        throw;
+                    }
+                }
+
+                CrawlInstruments.Add(CrawlInstruments.WorkersInUse, 1);
+
+                Log("processing queued link " + link.Url + " parent " + (!String.IsNullOrEmpty(link.ParentUrl) ? link.ParentUrl : ".") + " depth " + link.Depth);
+
+                string normalizedUrl = NormalizeUrl(_Settings.Crawl.StartUrl, link.Url);
+                if (string.IsNullOrEmpty(normalizedUrl))
+                {
+                    Log($"unable to normalize queued link {link.Url}");
+                    CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonInvalidUrl);
+                    return;
+                }
+
+                link.Url = normalizedUrl;
+
+                Uri uri;
+                try
+                {
+                    uri = new Uri(link.Url);
+                    if (IsAlreadyVisited(uri))
+                    {
+                        Log("already visited link " + link.Url);
+                        CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonAlreadyVisited);
                         return;
                     }
+                }
+                catch (UriFormatException)
+                {
+                    Log($"invalid URI format for normalized URL: {link.Url}");
+                    CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonInvalidUrl);
+                    return;
+                }
 
-                    WebResource wr = await RetrieveWebResource(link.Url, link.ParentUrl, link.Depth, false, token).ConfigureAwait(false);
-                    if (wr == null)
-                    {
-                        Log("unable to retrieve queued link " + link.Url);
-                        return;
-                    }
+                await Pause(token).ConfigureAwait(false);
 
-                    if (!TryMarkYielded(wr))
-                    {
-                        // A redirect led to a page another link already produced; it was returned (and its links queued) then.
-                        Log("resource for " + link.Url + " was already returned as " + wr.Url + ", skipping");
-                        return;
-                    }
+                WebResource wr;
+                string fetchOutcome;
 
-                    // A result that stopped on a redirect carries the redirect body, not page content, so its links are not followed.
-                    bool isContent = wr.RedirectOutcome == RedirectOutcomeEnum.None || wr.RedirectOutcome == RedirectOutcomeEnum.Followed;
+                using (StageScope fetch = new StageScope(CrawlSharpTelemetry.StageFetch))
+                {
+                    wr = await RetrieveWebResource(link.Url, link.ParentUrl, link.Depth, false, CrawlSharpTelemetry.PurposePage, fetch, token).ConfigureAwait(false);
+                    fetchOutcome = fetch.Outcome;
+                }
 
-                    if (isContent && wr.Data != null && IsNavigableContentType(wr.ContentType))
+                if (wr == null)
+                {
+                    Log("unable to retrieve queued link " + link.Url);
+                    pageOutcome = fetchOutcome;
+                    return;
+                }
+
+                if (!TryMarkYielded(wr))
+                {
+                    // A redirect led to a page another link already produced; it was returned (and its links queued) then.
+                    Log("resource for " + link.Url + " was already returned as " + wr.Url + ", skipping");
+                    CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonDuplicate);
+                    return;
+                }
+
+                RecordPageResult(wr);
+                CrawlInstruments.SetTag(pageActivity, CrawlSharpTelemetry.AttributeHttpStatusCode, wr.Status);
+                pageOutcome = CrawlSharpTelemetry.OutcomeSuccess;
+
+                // A result that stopped on a redirect carries the redirect body, not page content, so its links are not followed.
+                bool isContent = wr.RedirectOutcome == RedirectOutcomeEnum.None || wr.RedirectOutcome == RedirectOutcomeEnum.Followed;
+
+                if (isContent && wr.Data != null && IsNavigableContentType(wr.ContentType))
+                {
+                    using (StageScope extraction = new StageScope(CrawlSharpTelemetry.StageLinkExtraction))
                     {
                         // Resolve relative links against the URL the content came from, which differs from link.Url after a redirect.
                         string baseUrl = !String.IsNullOrEmpty(wr.FinalUrl) ? wr.FinalUrl : link.Url;
                         List<string> links = ExtractLinksFromHtml(baseUrl, wr.Data);
+                        int linkCount = links != null ? links.Count : 0;
+
+                        CrawlInstruments.Add(CrawlInstruments.LinksDiscovered, linkCount);
+                        extraction.SetTag(CrawlSharpTelemetry.AttributeLinkCount, linkCount);
 
                         if (_Settings.Crawl.FollowLinks)
                         {
@@ -2283,6 +2869,7 @@ namespace CrawlSharp.Web
                                             !currTrimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                                         {
                                             Log($"skipping non-HTTP URL: {currTrimmed}");
+                                            CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonNonHttp);
                                             continue;
                                         }
 
@@ -2290,6 +2877,7 @@ namespace CrawlSharp.Web
                                         if (!IsInCrawlScope(currTrimmed, out reason))
                                         {
                                             Log("avoiding link " + currTrimmed + ", " + reason);
+                                            CrawlInstruments.RecordSkipped(GetScopeReasonCode(reason));
                                             continue;
                                         }
 
@@ -2301,45 +2889,67 @@ namespace CrawlSharp.Web
                                         catch
                                         {
                                             Log($"invalid URI format for child link: {currTrimmed}");
+                                            CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonInvalidUrl);
                                             continue;
                                         }
 
                                         if (IsAlreadyVisited(childUri))
                                         {
                                             Log("already visited child link " + currTrimmed);
+                                            CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonAlreadyVisited);
                                             continue;
                                         }
 
                                         Log("adding link " + currTrimmed + " to queue from parent " + link.Url);
-                                        EnqueueQueuedLink(currTrimmed, link.Url, link.Depth + 1);
+                                        EnqueueQueuedLink(currTrimmed, link.Url, link.Depth + 1, CrawlSharpTelemetry.LinkSourcePage);
                                     }
                                 }
                                 else
                                 {
                                     Log("max depth reached in " + link.Url + ", not recursing into " + links.Count + " links");
+                                    CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonMaxDepth, links.Count);
                                 }
                             }
                         }
                         else
                         {
                             Log("not following links due to settings");
+                            CrawlInstruments.RecordSkipped(CrawlSharpTelemetry.ReasonFollowLinksDisabled, linkCount);
                         }
                     }
+                }
 
-                    EnqueueWebResource(wr);
-                }
-                finally
-                {
-                    _Semaphore.Release();
-                    RemoveProcessingLink(link);
-                }
+                EnqueueWebResource(wr);
             }
             catch (Exception e)
             {
+                if (e is OperationCanceledException && token.IsCancellationRequested)
+                {
+                    pageOutcome = CrawlSharpTelemetry.OutcomeCancelled;
+                }
+                else
+                {
+                    pageOutcome = CrawlSharpTelemetry.OutcomeFailure;
+                    CrawlInstruments.RecordError(CrawlSharpTelemetry.SpanPage, e);
+                    CrawlInstruments.SetError(pageActivity, e);
+                }
+
                 Exception?.Invoke(link.Url, e);
                 Log("error processing link " + link.Url + Environment.NewLine + e.ToString());
-                try { _Semaphore.Release(); } catch { }
+            }
+            finally
+            {
+                // Release only a slot this task acquired; releasing one it never held would let more than MaxParallelTasks run.
+                if (acquired)
+                {
+                    CrawlInstruments.Add(CrawlInstruments.WorkersInUse, -1);
+                    try { _Semaphore?.Release(); } catch (Exception) { }
+                }
+
                 RemoveProcessingLink(link);
+
+                CrawlInstruments.SetOutcomeStatus(pageActivity, pageOutcome);
+                CrawlInstruments.StopActivity(pageActivity, previous);
             }
         }
         

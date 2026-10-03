@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Radiant's in-process exporter in the CrawlSharp server: Watson HTTP metrics, CrawlSharp library and server
+  # metrics, and .NET runtime metrics. Reachable only inside the compose network (port 9464 is not published).
+  - job_name: 'crawlsharp-server'
+    metrics_path: '/metrics'
+    # Classic underscore names (crawlsharp_crawl_jobs_total), which the dashboards and alerts use. Prometheus 3 otherwise
+    # negotiates UTF-8 names, and the OpenTelemetry Prometheus exporter then emits dotted names and omits the unit
+    # suffix on counters whose name ends in "bytes", which fails the scrape.
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    static_configs:
+      - targets: ['crawlsharp-server:9464']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['127.0.0.1:9090']

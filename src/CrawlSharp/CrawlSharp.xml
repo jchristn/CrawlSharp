@@ -117,6 +117,955 @@
             <param name="dt">DataTable. </param>
             <returns>SHA256 hash.</returns>
         </member>
+        <member name="T:CrawlSharp.Telemetry.CrawlInstruments">
+            <summary>
+            The library's meter, activity source and instruments, plus best-effort helpers that record into them.
+            Every helper swallows its own failures: instrumentation never changes crawler behavior.
+            Thread safe; the instruments are shared by every crawler in the process.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlInstruments.Version">
+            <summary>
+            Library version stamped on the meter, the activity source and the build-info gauge.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlInstruments.Meter">
+            <summary>
+            The library meter.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlInstruments.Source">
+            <summary>
+            The library activity source.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.ElapsedSeconds(System.Int64)">
+            <summary>
+            Seconds elapsed since a <see cref="M:System.Diagnostics.Stopwatch.GetTimestamp"/> value.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.StartActivity(System.String,System.Diagnostics.ActivityKind,System.Diagnostics.ActivityContext)">
+            <summary>
+            Start an activity, returning null when nothing listens or when the listener fails.
+            A default <paramref name="parent"/> uses <see cref="P:System.Diagnostics.Activity.Current"/>.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.StartDetachedActivity(System.String,System.Diagnostics.ActivityKind)">
+            <summary>
+            Start an activity without making it <see cref="P:System.Diagnostics.Activity.Current"/>, for a long-lived root whose children are
+            parented explicitly through its context.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.StopActivity(System.Diagnostics.Activity,System.Diagnostics.Activity)">
+            <summary>
+            Stop an activity and leave <see cref="P:System.Diagnostics.Activity.Current"/> as it was before the stop.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RestoreCurrent(System.Diagnostics.Activity)">
+            <summary>
+            Set <see cref="P:System.Diagnostics.Activity.Current"/>, ignoring failures.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.SetTag(System.Diagnostics.Activity,System.String,System.Object)">
+            <summary>
+            Set a tag on an activity, ignoring a null activity and failures.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.SetError(System.Diagnostics.Activity,System.Exception)">
+            <summary>
+            Mark an activity as failed and attach the exception as an OpenTelemetry "exception" event.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.SetOutcomeStatus(System.Diagnostics.Activity,System.String)">
+            <summary>
+            Set an explicit status on an activity from an outcome label.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.SetUrl(System.Diagnostics.Activity,System.Uri)">
+            <summary>
+            Record the URL of a request on a span, without query string, fragment or user information.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.SetUrl(System.Diagnostics.Activity,System.String)">
+            <summary>
+            Record the URL of a request on a span, parsing it first; an unparseable URL is not recorded.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.SanitizeUrl(System.Uri)">
+            <summary>
+            Scheme, host, port and path of a URL, dropping the query string, fragment and user information, which can carry secrets.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.StatusClass(System.Int32)">
+            <summary>
+            HTTP status class label ("2xx"), or "none" when no status was received.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.OutcomeForStatus(System.Int32)">
+            <summary>
+            Integration outcome for an HTTP status.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.OutcomeForException(System.Exception,System.Threading.CancellationToken)">
+            <summary>
+            Integration outcome for an exception thrown by an outbound call.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.IsErrorOutcome(System.String)">
+            <summary>
+            Whether an outcome represents an error for span status purposes.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.Add(System.Diagnostics.Metrics.Counter{System.Int64},System.Int64)">
+            <summary>
+            Add to a counter or up-down counter with no labels.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.Add(System.Diagnostics.Metrics.Counter{System.Int64},System.Int64,System.String,System.String)">
+            <summary>
+            Add to a counter with one label.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.Add(System.Diagnostics.Metrics.UpDownCounter{System.Int64},System.Int64)">
+            <summary>
+            Add to an up-down counter with no labels.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.Add(System.Diagnostics.Metrics.UpDownCounter{System.Int64},System.Int64,System.String,System.String)">
+            <summary>
+            Add to an up-down counter with one label.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordSkipped(System.String,System.Int64)">
+            <summary>
+            Record a skipped link.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordStage(System.String,System.String,System.Double)">
+            <summary>
+            Record one stage execution.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordError(System.String,System.Exception)">
+            <summary>
+            Record a caught error.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordIntegration(System.String,System.String,System.String,System.Double,System.Exception)">
+            <summary>
+            Record one outbound call.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordRetry(System.String,System.String)">
+            <summary>
+            Record a retried outbound call.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordCrawl(System.String,System.String,System.Double)">
+            <summary>
+            Record a finished crawl job.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordPage(System.String,System.String,System.Int32,System.Int64)">
+            <summary>
+            Record a page taken from the crawl queue.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.CrawlInstruments.RecordRedirect(System.String,System.Int32)">
+            <summary>
+            Record the redirect outcome of a page.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Telemetry.CrawlSharpTelemetry">
+            <summary>
+            The public telemetry contract for CrawlSharp: every meter, activity source, instrument, span, attribute and
+            label value that CrawlSharp (and the CrawlSharp server) emits.  These strings are consumed by dashboards and
+            alerts, so they are stable across releases; treat a change to any of them as a breaking change.
+            <para>
+            The library emits only through the base class library (<see cref="T:System.Diagnostics.Metrics.Meter"/> and
+            <see cref="T:System.Diagnostics.ActivitySource"/>) and takes no exporter dependency.  Emission costs a few
+            nanoseconds and allocates nothing until a host subscribes, for example with Radiant:
+            <c>settings.Sources.AddMeter(CrawlSharpTelemetry.MeterName)</c> and
+            <c>settings.Sources.AddActivitySource(CrawlSharpTelemetry.ActivitySourceName)</c>, or with the OpenTelemetry SDK:
+            <c>.AddMeter("CrawlSharp")</c> and <c>.AddSource("CrawlSharp")</c>.
+            </para>
+            <para>
+            Instrument names are dotted OpenTelemetry names with UCUM units.  A Prometheus exporter rewrites them to snake case
+            with unit and type suffixes, for example <c>crawlsharp.crawl.duration</c> becomes
+            <c>crawlsharp_crawl_duration_seconds</c>.  Every label is bounded; URLs and other identifiers appear only on spans.
+            </para>
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.MeterName">
+            <summary>
+            Name of the meter used by the CrawlSharp library.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ActivitySourceName">
+            <summary>
+            Name of the activity source used by the CrawlSharp library.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerMeterName">
+            <summary>
+            Name of the meter used by the CrawlSharp server (the HTTP front end around the library).
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerActivitySourceName">
+            <summary>
+            Name of the activity source used by the CrawlSharp server.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.CrawlJobs">
+            <summary>
+            Counter of crawl jobs that finished, by mode and outcome.  Unit {crawl}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.CrawlDuration">
+            <summary>
+            Histogram of end-to-end crawl job duration, by mode and outcome.  Unit s.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.CrawlActive">
+            <summary>
+            Up-down counter of crawl jobs currently running, by mode.  Unit {crawl}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.CrawlLastSuccess">
+            <summary>
+            Gauge holding the Unix time, in seconds, at which a crawl job last completed successfully in this process.  Unit s.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageDuration">
+            <summary>
+            Histogram of per-stage duration, by stage and outcome.  Unit s.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageEvents">
+            <summary>
+            Counter of stage executions, by stage and outcome.  Unit {event}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.Pages">
+            <summary>
+            Counter of pages processed from the crawl queue, by mode, outcome and status class.  Unit {page}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.PageSize">
+            <summary>
+            Histogram of retrieved page body size, by mode.  Unit By.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.LinksDiscovered">
+            <summary>
+            Counter of links found in retrieved pages.  Unit {link}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.LinksEnqueued">
+            <summary>
+            Counter of links added to the crawl queue, by source.  Unit {link}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.LinksSkipped">
+            <summary>
+            Counter of links not retrieved, by reason.  Unit {link}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.Redirects">
+            <summary>
+            Counter of pages whose retrieval involved a redirect, by redirect outcome.  Unit {page}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.RedirectHops">
+            <summary>
+            Histogram of redirect hops per redirected page.  Unit {hop}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.IntegrationRequests">
+            <summary>
+            Counter of outbound calls, by integration service, operation and outcome.  Unit {request}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.IntegrationDuration">
+            <summary>
+            Histogram of outbound call duration, by integration service, operation and outcome.  Unit s.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.Retries">
+            <summary>
+            Counter of retried outbound calls, by integration service and reason.  Unit {retry}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.Errors">
+            <summary>
+            Counter of errors caught by the crawler, by stage and error type.  Unit {error}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.QueueSize">
+            <summary>
+            Up-down counter of links waiting in crawl queues.  Unit {link}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.WorkersInUse">
+            <summary>
+            Up-down counter of worker slots currently held (pages being retrieved).  Unit {worker}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.WorkersCapacity">
+            <summary>
+            Up-down counter of worker slots available to running crawls (the sum of MaxParallelTasks).  Unit {worker}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ResultsBuffered">
+            <summary>
+            Up-down counter of retrieved resources waiting to be read by the consumer of the crawl.  Unit {resource}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.VisitedSize">
+            <summary>
+            Up-down counter of URLs held in visited-link tables.  Unit {url}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.BrowserContextsActive">
+            <summary>
+            Up-down counter of open headless browser contexts.  Unit {context}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AutoExpandChanges">
+            <summary>
+            Counter of collapsible elements expanded by headless auto-expand, by kind.  Unit {change}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.SitemapUrls">
+            <summary>
+            Counter of URLs read from sitemap.xml files.  Unit {url}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.BuildInfo">
+            <summary>
+            Gauge with value 1 carrying the library version as a label.  Unit 1.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerCrawlRequests">
+            <summary>
+            Counter of crawl requests handled by the server, by outcome.  Unit {request}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerCrawlRequestDuration">
+            <summary>
+            Histogram of crawl request duration in the server, from request to the final event, by outcome.  Unit s.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerCrawlStreamsActive">
+            <summary>
+            Up-down counter of server-sent-event crawl streams currently open.  Unit {stream}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerStageDuration">
+            <summary>
+            Histogram of server stage duration (deserialize, crawler_init, sse_send), by stage and outcome.  Unit s.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerSseEvents">
+            <summary>
+            Counter of server-sent events written to crawl streams.  Unit {event}.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerSseBytes">
+            <summary>
+            Counter of bytes written as server-sent event payloads.  Unit By.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerBuildInfo">
+            <summary>
+            Gauge with value 1 carrying the server version and runtime as labels.  Unit 1.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerConfigInfo">
+            <summary>
+            Gauge with value 1 carrying non-secret telemetry configuration as labels.  Unit 1.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.SpanCrawl">
+            <summary>
+            Root span of a crawl job.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.SpanPage">
+            <summary>
+            Span for one queued link, from waiting for a worker slot to queuing its child links.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.SpanStagePrefix">
+            <summary>
+            Prefix of stage span names; a stage span is named "stage:" plus the stage name, for example "stage:fetch".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.SpanServerCrawlRequest">
+            <summary>
+            Server span around one crawl request, nested under Watson's HTTP server span.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageRobots">
+            <summary>
+            Stage: retrieve and parse robots.txt.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageSitemap">
+            <summary>
+            Stage: retrieve and parse sitemap.xml.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageQueued">
+            <summary>
+            Stage: a queued link waiting for a worker slot.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageFetch">
+            <summary>
+            Stage: retrieve one URL, including redirects and retries.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageContentTypeCheck">
+            <summary>
+            Stage: the HEAD request that resolves redirects and the content type before headless retrieval.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageBrowserNavigate">
+            <summary>
+            Stage: headless browser retrieval of one page.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageAutoExpand">
+            <summary>
+            Stage: headless expansion of collapsible content.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageLinkExtraction">
+            <summary>
+            Stage: extract, filter and queue the links of a retrieved page.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StagePolitenessDelay">
+            <summary>
+            Stage: the configured or robots.txt delay between requests.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageRetryBackoff">
+            <summary>
+            Stage: the backoff before retrying a throttled (429) request.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageThrottleDelay">
+            <summary>
+            Stage: the configured pause after a throttled (429) request that is not retried.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.StageBrowserStartup">
+            <summary>
+            Stage: start the headless browser when a crawler is constructed.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerStageDeserialize">
+            <summary>
+            Server stage: deserialize the crawl request body.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerStageCrawlerInit">
+            <summary>
+            Server stage: construct and validate the crawler.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServerStageSseSend">
+            <summary>
+            Server stage: write one server-sent event to the client.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeOutcome">
+            <summary>
+            Label and span attribute: outcome of an operation.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeMode">
+            <summary>
+            Label and span attribute: crawl mode, "rest" or "headless".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeStage">
+            <summary>
+            Label and span attribute: stage name.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeStatusClass">
+            <summary>
+            Label: HTTP status class of a page, "1xx" through "5xx", or "none".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeReason">
+            <summary>
+            Label: why a link was skipped.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeLinkSource">
+            <summary>
+            Label: where a queued link came from, "start", "sitemap" or "page".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeRedirectOutcome">
+            <summary>
+            Label and span attribute: redirect outcome, for example "followed" or "loop_detected".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeIntegrationService">
+            <summary>
+            Label and span attribute: integration service, "http" or "playwright".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeIntegrationOperation">
+            <summary>
+            Label and span attribute: integration operation, for example "GET", "HEAD" or "navigate".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeAutoExpandKind">
+            <summary>
+            Label: kind of element expanded by auto-expand, "details", "builtin" or "custom".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeVersion">
+            <summary>
+            Label: library or server version.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeRuntime">
+            <summary>
+            Label: .NET runtime description.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeErrorType">
+            <summary>
+            Label (OpenTelemetry semantic convention): the exception type of a failure.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeDepth">
+            <summary>
+            Span attribute: crawl depth of a page.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributePurpose">
+            <summary>
+            Span attribute: purpose of a fetch, "page", "robots" or "sitemap".
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeRedirectHops">
+            <summary>
+            Span attribute: number of redirect hops.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeRetryAttempt">
+            <summary>
+            Span attribute: zero-based retry attempt of an outbound call.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeDelayMs">
+            <summary>
+            Span attribute: delay applied, in milliseconds.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeLinkCount">
+            <summary>
+            Span attribute: number of links found, queued or skipped.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeResourceCount">
+            <summary>
+            Span attribute: number of resources returned by a crawl.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeMaxDepth">
+            <summary>
+            Span attribute: configured maximum crawl depth.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeMaxParallelTasks">
+            <summary>
+            Span attribute: configured maximum parallel tasks.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeFollowLinks">
+            <summary>
+            Span attribute: whether links are followed.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributePageSize">
+            <summary>
+            Span attribute: body size of a retrieved page, in bytes.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeUrlFull">
+            <summary>
+            Span attribute (OpenTelemetry semantic convention): URL without query string, fragment or user information.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeServerAddress">
+            <summary>
+            Span attribute (OpenTelemetry semantic convention): host of the remote server.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeServerPort">
+            <summary>
+            Span attribute (OpenTelemetry semantic convention): port of the remote server.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeHttpMethod">
+            <summary>
+            Span attribute (OpenTelemetry semantic convention): HTTP request method.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeHttpStatusCode">
+            <summary>
+            Span attribute (OpenTelemetry semantic convention): HTTP response status code.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AttributeSseEvents">
+            <summary>
+            Span attribute: number of server-sent events written.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeSuccess">
+            <summary>
+            Outcome: the operation succeeded.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeFailure">
+            <summary>
+            Outcome: the operation failed with an error.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeSkipped">
+            <summary>
+            Outcome: the operation was skipped (disabled by settings, or not applicable).
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeCancelled">
+            <summary>
+            Outcome: the operation was cancelled through its cancellation token.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeNotFound">
+            <summary>
+            Outcome: the requested resource (robots.txt, sitemap.xml) was not available.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeCompleted">
+            <summary>
+            Crawl outcome: every queued link was processed.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeAbandoned">
+            <summary>
+            Crawl outcome: the consumer stopped reading before the crawl finished.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeHttpError">
+            <summary>
+            Page outcome: the server answered with a 4xx or 5xx status.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeRedirectStopped">
+            <summary>
+            Page outcome: the redirect chain stopped before reaching content (loop, limit, scope, robots, not followed).
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeClientError">
+            <summary>
+            Integration outcome: the remote answered with a 4xx status other than 429.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeServerError">
+            <summary>
+            Integration outcome: the remote answered with a 5xx status.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeThrottled">
+            <summary>
+            Integration outcome: the remote answered 429 Too Many Requests.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeTimeout">
+            <summary>
+            Integration outcome: the call timed out.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeRedirected">
+            <summary>
+            Integration outcome: the browser navigation was aborted because it redirected and is resolved by the crawler.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OutcomeDownload">
+            <summary>
+            Integration outcome: the browser navigation started a download and the REST client was used instead.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ModeRest">
+            <summary>
+            Crawl mode: plain HTTP retrieval.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ModeHeadless">
+            <summary>
+            Crawl mode: headless browser retrieval.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServiceHttp">
+            <summary>
+            Integration service: HTTP requests to crawled sites.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ServicePlaywright">
+            <summary>
+            Integration service: the Playwright headless browser.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OperationInstall">
+            <summary>
+            Playwright operation: install the browser.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OperationLaunch">
+            <summary>
+            Playwright operation: launch the browser.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OperationNavigate">
+            <summary>
+            Playwright operation: navigate a page.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.OperationRouteFetch">
+            <summary>
+            Playwright operation: fetch a routed request with credentials.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.LinkSourceStart">
+            <summary>
+            Link source: the start URL.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.LinkSourceSitemap">
+            <summary>
+            Link source: sitemap.xml.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.LinkSourcePage">
+            <summary>
+            Link source: a link in a retrieved page.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.PurposePage">
+            <summary>
+            Fetch purpose: a queued page.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.PurposeRobots">
+            <summary>
+            Fetch purpose: robots.txt.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.PurposeSitemap">
+            <summary>
+            Fetch purpose: sitemap.xml.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.RetryReasonThrottled">
+            <summary>
+            Retry reason: the remote answered 429.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonAlreadyVisited">
+            <summary>
+            Skip reason: the URL was already retrieved.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonAlreadyQueued">
+            <summary>
+            Skip reason: the URL is already queued.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonInProcessing">
+            <summary>
+            Skip reason: the URL is being retrieved by another worker.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonDuplicate">
+            <summary>
+            Skip reason: a redirect led to a resource that was already returned.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonInvalidUrl">
+            <summary>
+            Skip reason: the URL is malformed or cannot be normalized.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonNonHttp">
+            <summary>
+            Skip reason: the URL is not http or https.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonRobotsDisallowed">
+            <summary>
+            Skip reason: robots.txt disallows the URL.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonMaxDepth">
+            <summary>
+            Skip reason: the page is at the maximum crawl depth, so its links are not followed.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonFollowLinksDisabled">
+            <summary>
+            Skip reason: FollowLinks is false.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonDeniedDomain">
+            <summary>
+            Skip reason: the domain is in DeniedDomains.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonOutsideRootDomain">
+            <summary>
+            Skip reason: the URL is outside the start URL's root domain.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonOutsideSubdomain">
+            <summary>
+            Skip reason: the URL is outside the start URL's subdomain.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonNotChildUrl">
+            <summary>
+            Skip reason: the URL is not a child of the start URL.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonNotAllowedDomain">
+            <summary>
+            Skip reason: the domain is not in AllowedDomains.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonExternal">
+            <summary>
+            Skip reason: the URL is external and FollowExternalLinks is false.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.ReasonExcluded">
+            <summary>
+            Skip reason: the URL matches an exclusion pattern.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AutoExpandDetails">
+            <summary>
+            Auto-expand kind: a details element was opened.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AutoExpandBuiltIn">
+            <summary>
+            Auto-expand kind: a built-in selector target was clicked.
+            </summary>
+        </member>
+        <member name="F:CrawlSharp.Telemetry.CrawlSharpTelemetry.AutoExpandCustom">
+            <summary>
+            Auto-expand kind: a custom selector target was clicked.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Telemetry.IntegrationScope">
+            <summary>
+            Times one outbound call: opens a client span named "&lt;service&gt; &lt;operation&gt;" and, on dispose, records the
+            integration request counter and latency histogram with the call's outcome.  The outcome defaults to failure, so a
+            call that exits without reporting a result is never counted as a success.
+            Best-effort; never throws.  Not thread safe: use one scope per call.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Telemetry.IntegrationScope.Activity">
+            <summary>
+            The client span, or null when nothing listens.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.IntegrationScope.#ctor(System.String,System.String)">
+            <summary>
+            Start an outbound call.
+            </summary>
+            <param name="service">Integration service, one of the CrawlSharpTelemetry service constants.</param>
+            <param name="operation">Operation, for example an HTTP method or a Playwright operation constant.</param>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.IntegrationScope.SetOutcome(System.String)">
+            <summary>
+            Set the outcome recorded when the call ends.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.IntegrationScope.SetStatus(System.Int32)">
+            <summary>
+            Record the HTTP status of the response and derive the outcome from it.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.IntegrationScope.SetTag(System.String,System.Object)">
+            <summary>
+            Set a span tag.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.IntegrationScope.Fail(System.Exception,System.Threading.CancellationToken)">
+            <summary>
+            Mark the call failed with an exception; timeouts and cancellations get their own outcomes.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.IntegrationScope.Dispose">
+            <summary>
+            End the call and record it.
+            </summary>
+        </member>
+        <member name="T:CrawlSharp.Telemetry.StageScope">
+            <summary>
+            Times one pipeline stage: opens a "stage:&lt;name&gt;" span and, on dispose, records the stage duration histogram
+            and event counter with the stage's outcome and sets the span status.  The outcome defaults to success.
+            Best-effort; never throws.  Not thread safe: use one scope per stage execution on one logical flow.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Telemetry.StageScope.Activity">
+            <summary>
+            The stage span, or null when nothing listens.
+            </summary>
+        </member>
+        <member name="P:CrawlSharp.Telemetry.StageScope.Outcome">
+            <summary>
+            The outcome that will be recorded.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.StageScope.#ctor(System.String,System.Diagnostics.ActivityContext)">
+            <summary>
+            Start a stage.
+            </summary>
+            <param name="stage">Stage name, one of the CrawlSharpTelemetry stage constants.</param>
+            <param name="parent">Explicit parent context, or default to nest under <see cref="P:System.Diagnostics.Activity.Current"/>.</param>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.StageScope.SetOutcome(System.String)">
+            <summary>
+            Set the outcome recorded when the stage ends.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.StageScope.SetTag(System.String,System.Object)">
+            <summary>
+            Set a span tag.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.StageScope.Fail(System.Exception)">
+            <summary>
+            Mark the stage failed: records the error counter, marks the span as an error and attaches the exception.
+            A cancellation is recorded as cancelled rather than failed.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Telemetry.StageScope.Dispose">
+            <summary>
+            End the stage and record it.
+            </summary>
+        </member>
         <member name="T:CrawlSharp.Web.AuthenticationSettings">
             <summary>
             Authentication settings.
@@ -1136,6 +2085,11 @@
             Playwright does not route the requests a redirect starts, so the browser would follow a redirect without credentials.
             For a subresource that is the safe direction and is accepted.  A redirected navigation is aborted instead, and
             <paramref name="onNavigationRedirect"/> tells the caller to resolve the chain itself and navigate to where it ends.
+            </summary>
+        </member>
+        <member name="M:CrawlSharp.Web.WebCrawler.RetrieveWebResource(System.String,System.String,System.Int32,System.Boolean,System.String,CrawlSharp.Telemetry.StageScope,System.Threading.CancellationToken)">
+            <summary>
+            Retrieve one URL within a caller-owned fetch stage, whose outcome tells a null result's cause (skipped, failed, cancelled).
             </summary>
         </member>
         <member name="M:CrawlSharp.Web.WebCrawler.IsInCrawlScope(System.String,System.String@)">

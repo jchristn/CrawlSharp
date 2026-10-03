@@ -10,6 +10,10 @@ x86/
 bld/
 [Bb]in/
 [Oo]bj/
+# Nested build output (root-only patterns above do not match project subdirectories)
+**/[Bb]in/
+**/[Oo]bj/
+**/TestResults/
 [Ll]og/
 [Ll]ogs/
 

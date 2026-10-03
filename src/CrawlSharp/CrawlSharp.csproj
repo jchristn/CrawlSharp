@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-		<Version>1.1.0</Version>
+		<Version>1.2.0</Version>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<DocumentationFile>CrawlSharp.xml</DocumentationFile>
@@ -16,8 +16,8 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/jchristn/CrawlSharp</RepositoryUrl>
 		<RepositoryType>github</RepositoryType>
-		<PackageTags>web crawl crawler</PackageTags>
-		<PackageReleaseNotes>Redirects are followed by CrawlSharp with loop detection and a MaxRedirects limit, so redirect loops no longer hang a crawl; credentials are sent only to the start origin (plus CredentialOrigins), authentication settings are validated, and WebResource gains FinalUrl, RedirectChain and RedirectOutcome. FollowRedirects = false now returns the redirect response itself.</PackageReleaseNotes>
+		<PackageTags>web crawl crawler opentelemetry metrics tracing</PackageTags>
+		<PackageReleaseNotes>Built-in observability: CrawlSharp emits metrics and traces through the BCL Meter and ActivitySource named "CrawlSharp" (crawl jobs, every pipeline stage, pages, links, redirects, outbound HTTP and Playwright calls, queue and worker gauges, errors by type). Near-zero cost until a host subscribes; no exporter dependency. Names are in CrawlSharp.Telemetry.CrawlSharpTelemetry and documented in TELEMETRY.md. Also fixes a worker-slot over-release after a failed page.</PackageReleaseNotes>
 		<PackageLicenseFile>LICENSE.md</PackageLicenseFile>
 		<IncludeSymbols>True</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>

@@ -5,22 +5,48 @@ services:
   # See https://hub.docker.com/r/jchristn77/crawlsharp
   # and https://github.com/jchristn/crawlsharp
   #
+  # Telemetry (see TELEMETRY.md): one Radiant host in the server exports traces to Tempo over OTLP, ships logs
+  # directly to Loki, and serves every metric (Watson HTTP, CrawlSharp, .NET runtime) on port 9464 for Prometheus.
+  # Port 9464 stays inside the compose network on purpose: the scrape endpoint has no authentication.
+  #
 
   crawlsharp-server:
     container_name: crawlsharp-server
+    # The Prometheus endpoint binds this hostname (Radiant 0.1.2 cannot bind "*" or 0.0.0.0), so Prometheus scrapes
+    # crawlsharp-server:9464 on the compose network.
+    hostname: crawlsharp-server
     image: jchristn77/crawlsharp:latest
     ports:
       - "8000:8000"
     stdin_open: true
     tty: true
+    environment:
+      CRAWLSHARP_TELEMETRY_ENABLED: 'true'
+      CRAWLSHARP_TELEMETRY_SERVICE_NAME: 'crawlsharp-server'
+      CRAWLSHARP_OTLP_ENABLED: 'true'
+      CRAWLSHARP_OTLP_ENDPOINT: 'http://tempo:4317'
+      CRAWLSHARP_OTLP_PROTOCOL: 'grpc'
+      CRAWLSHARP_PROMETHEUS_ENABLED: 'true'
+      CRAWLSHARP_PROMETHEUS_HOSTNAME: 'crawlsharp-server'
+      CRAWLSHARP_PROMETHEUS_PORT: '9464'
+      CRAWLSHARP_LOKI_ENABLED: 'true'
+      CRAWLSHARP_LOKI_ENDPOINT: 'http://loki:3100/otlp'
+      CRAWLSHARP_TRACES_SAMPLING_RATIO: '1.0'
+      # 2 = information; set 1 (debug) to ship the crawler's per-URL log lines to Loki as well.
+      CRAWLSHARP_LOG_MINIMUM_SEVERITY: '2'
     volumes:
       - ./server/logs/:/app/logs/
       - ./server/assets/:/app/assets/
+    depends_on:
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/"]
       interval: 5s
       timeout: 2s
-      retries: 3
+      retries: 2
       start_period: 10s
     restart: unless-stopped
 
@@ -36,7 +62,114 @@ services:
       - "8001:8001"
     environment:
       - CRAWLSHARP_SERVER_URL=
+      # Browser-reachable URLs shown on the dashboard's External Services card (host-published ports).
+      - GRAFANA_URL=http://localhost:3000
+      - PROMETHEUS_URL=http://localhost:9090
+      - TEMPO_URL=http://localhost:3200
+      - LOKI_URL=http://localhost:3100
     depends_on:
       crawlsharp-server:
         condition: service_healthy
     restart: unless-stopped
+
+  #
+  # Observability: Prometheus (metrics), Tempo (traces), Loki (logs), Grafana (dashboards).
+  # Images are pinned; Tempo 2.6.1 matches the reference stack because later dev builds reject this config.
+  #
+
+  prometheus:
+    container_name: crawlsharp-prometheus
+    image: prom/prometheus:v3.5.4
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+      - '--storage.tsdb.path=/prometheus'
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - crawlsharp-prometheus-data:/prometheus
+    depends_on:
+      crawlsharp-server:
+        condition: service_healthy
+    healthcheck:
+      # The prometheus image ships wget, not curl.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 20s
+    restart: unless-stopped
+
+  tempo:
+    container_name: crawlsharp-tempo
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - crawlsharp-tempo-data:/var/tempo
+    healthcheck:
+      # The tempo image ships wget, not curl; /ready returns 503 until fully ready.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3200/ready || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 40s
+    restart: unless-stopped
+
+  loki:
+    container_name: crawlsharp-loki
+    image: grafana/loki:3.2.1
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - crawlsharp-loki-data:/loki
+    healthcheck:
+      # The loki image ships wget, not curl; /ready returns 200 once ingestion is ready.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3100/ready || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 30s
+    restart: unless-stopped
+
+  grafana:
+    container_name: crawlsharp-grafana
+    image: grafana/grafana-oss:13.0.2
+    ports:
+      - "3000:3000"
+    environment:
+      # admin/admin is a local-development default only. For any shared or hosted deployment, set
+      # GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD in the environment (never commit a real password here).
+      GF_SECURITY_ADMIN_USER: '${GRAFANA_ADMIN_USER:-admin}'
+      GF_SECURITY_ADMIN_PASSWORD: '${GRAFANA_ADMIN_PASSWORD:-admin}'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - crawlsharp-grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../assets/grafana:/var/lib/grafana/dashboards/crawlsharp:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  crawlsharp-prometheus-data:
+  crawlsharp-tempo-data:
+  crawlsharp-loki-data:
+  crawlsharp-grafana-data:

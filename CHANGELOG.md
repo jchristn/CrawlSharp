@@ -1,5 +1,30 @@
 # Change Log
 
+## v1.2.0
+
+### Additions
+
+- Observability in the library: metrics and traces through the BCL `Meter` and `ActivitySource` named `CrawlSharp`, with no new package dependency.  Covers crawl jobs (count, duration, outcome, running, last success), every pipeline stage (`robots`, `sitemap`, `queued`, `fetch`, `content_type_check`, `browser_navigate`, `auto_expand`, `link_extraction`, `politeness_delay`, `retry_backoff`, `throttle_delay`, `browser_startup`), pages, links discovered/enqueued/skipped by reason, redirects, outbound HTTP and Playwright calls with latency and outcome, 429 retries, queue/worker/result-buffer/visited/browser-context gauges, errors by stage and `error.type`, and build info.  Spans: a `crawl` root with `crawl.page`, `stage:*` and `http GET`/`playwright navigate` client spans, all in one trace.
+- `CrawlSharp.Telemetry.CrawlSharpTelemetry`: every meter, source, instrument, span, attribute and label-value name as public constants.
+- Server: one Radiant 0.1.2 host subscribed to `Watson`, `CrawlSharp` and `CrawlSharp.Server`, exporting traces over OTLP, logs to Loki, and all metrics (including .NET runtime) on a Prometheus endpoint (`127.0.0.1:9464/metrics` by default).  Configured with `CRAWLSHARP_*` environment variables; see TELEMETRY.md.  Watson's built-in HTTP telemetry is explicitly enabled.
+- Server metrics and spans for the crawl endpoint: outcome (`completed`, `bad_request`, `deserialization_error`, `invalid_settings`, `client_disconnected`, `failed`), duration, open streams, server-sent events and bytes, and `deserialize`/`crawler_init`/`sse_send` stages.
+- `Docker/compose.yaml`: Prometheus, Tempo, Loki and Grafana (pinned images, healthchecks, `service_healthy` ordering), Grafana provisioned with datasources and six dashboards in a CrawlSharp folder (`assets/grafana/`).  Grafana credentials can be overridden with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`.
+- Dashboard: External Services card on the home page with URLs, default credentials and copy buttons, configurable through `GRAFANA_URL`, `PROMETHEUS_URL`, `TEMPO_URL` and `LOKI_URL`.
+- TELEMETRY.md, plus `TelemetrySuite` and `ServerTelemetrySuite` tests; `build-*.sh` equivalents of the image build scripts.
+
+### Fixes
+
+- A page that failed after taking a worker slot released the slot twice, which could let more than `MaxParallelTasks` pages run at once.  Each slot is now released exactly once.
+- The 429 backoff jitter no longer shares an unsynchronized `Random` across workers.
+- A queue processor that faulted ended the crawl silently; it is now reported through the `Exception` callback and recorded as a failed crawl.
+- The server kept crawling after a client stopped reading the event stream; it now stops the crawl.
+- The server's Docker healthcheck probes `127.0.0.1` with 2 retries.
+- `src/.dockerignore` excludes nested `bin/` and `obj/` folders; the server build context had grown to several gigabytes of local build output. The dashboard gains a `.dockerignore`.
+
+### Behavior notes
+
+- The politeness delay (`RequestDelayMs` or robots.txt `Crawl-delay`) and the 429 throttle pause now run outside the HTTP request, so they appear as their own stages instead of inflating fetch latency; total crawl timing is unchanged.  When retrying a 429, the backoff now happens after the throttled response is released.
+
 ## v1.1.0
 
 ### Behavior changes (read before upgrading)
