@@ -23,7 +23,7 @@ The goal is operational. An on-call engineer looking only at Grafana and Tempo s
 
 ```
 CrawlSharp.Server process
-  Watson 7.1 (meter + source "Watson")          HTTP metrics, one server span per request
+  Watson 7.2 (meter + source "Watson")          HTTP metrics, one server span per request
   CrawlSharp.Server (meter + source)            crawl endpoint outcome, SSE stream, server stages
   CrawlSharp library (meter + source)           crawl jobs, pipeline stages, pages, links, outbound calls
   Radiant host (one per process)                subscribes to all of the above + .NET runtime
@@ -75,7 +75,7 @@ using TracerProvider tracer = Sdk.CreateTracerProviderBuilder()
 
 With nothing at all (tests, diagnostics): a `MeterListener` and an `ActivityListener` from the base class library. `src/Test.Shared/TelemetryCapture.cs` is a complete example.
 
-Trace context: the root `crawl` span is created as a child of `Activity.Current` at the moment the crawl starts (so a crawl started inside an ASP.NET Core or Watson request joins that request's trace), and every page, stage and client span is parented explicitly to it, including work running on the background queue processor. Outbound HTTP requests carry a W3C `traceparent` header through .NET's `HttpClient` propagation whenever a span is active.
+Trace context: the root `crawl` span is created as a child of `Activity.Current` at the moment the crawl starts (so a crawl started inside an ASP.NET Core or Watson request joins that request's trace), and every page, stage and client span is parented explicitly to it, including work running on the background queue processor. Requests to crawled sites deliberately carry no W3C trace context (`traceparent`/`tracestate`): the sites are third parties, so the crawler's HTTP handler suppresses propagation. The trace still covers each request through its `http GET`/`http HEAD` client span.
 
 ## Running the server with the observability stack
 
@@ -128,7 +128,7 @@ Watson settings (`WebserverSettings.Telemetry`) are set explicitly in `Program.c
 |---|---|---|---|
 | `CrawlSharp` | Meter and ActivitySource | CrawlSharp library | library version (`otel_scope_version`) |
 | `CrawlSharp.Server` | Meter and ActivitySource | CrawlSharp server | library version |
-| `Watson` | Meter and ActivitySource | Watson 7.1 web server | Watson version |
+| `Watson` | Meter and ActivitySource | Watson 7.2 web server | Watson version |
 | `System.Runtime` | Meter | .NET runtime (via Radiant `Metrics.IncludeRuntime`) | |
 
 All instrument, span, attribute and label-value strings are constants on `CrawlSharp.Telemetry.CrawlSharpTelemetry`. Treat them as public API.
@@ -197,7 +197,7 @@ Wait time for a worker slot is the `queued` stage of `crawlsharp.crawl.stage.dur
 
 ### Watson and runtime (not defined by CrawlSharp)
 
-Watson 7.1 emits the HTTP surface: `http_server_request_duration_seconds` (labels `http_request_method`, `http_response_status_code`, `http_route`), `http_server_active_requests`, request and response body-size histograms, and `watson_*` server, connection, route and exception metrics; see Watson's `TELEMETRY.md`. The crawl endpoint's route label is `/crawl/`. Radiant adds .NET runtime metrics (`dotnet_gc_*`, `dotnet_thread_pool_*`, `dotnet_process_*`, `dotnet_exceptions_total`, ...) and process metrics (`process_uptime_seconds`, `process_memory_usage_bytes`, `process_thread_count`).
+Watson 7.2 emits the HTTP surface: `http_server_request_duration_seconds` (labels `http_request_method`, `http_response_status_code`, `http_route`), `http_server_active_requests`, request and response body-size histograms, and `watson_*` server, connection, route and exception metrics; see Watson's `TELEMETRY.md`. The crawl endpoint's route label is `/crawl/`. Radiant adds .NET runtime metrics (`dotnet_gc_*`, `dotnet_thread_pool_*`, `dotnet_process_*`, `dotnet_exceptions_total`, ...) and process metrics (`process_uptime_seconds`, `process_memory_usage_bytes`, `process_thread_count`).
 
 ## Label values
 

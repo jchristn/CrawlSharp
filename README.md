@@ -6,6 +6,11 @@
 
 CrawlSharp is a library and integrated webserver for crawling basic web content.
 
+## New in v1.2.1
+
+- Requests to crawled sites no longer carry W3C trace context (`traceparent`/`tracestate`) headers
+- The server is on Watson 7.2.1
+
 ## New in v1.2.0
 
 - Built-in observability: the library emits metrics and traces for every crawl job, pipeline stage, page, link, redirect and outbound HTTP or Playwright call through the BCL `Meter` and `ActivitySource` named `CrawlSharp`, with no exporter dependency and near-zero cost until something subscribes; see [Observability](#observability)

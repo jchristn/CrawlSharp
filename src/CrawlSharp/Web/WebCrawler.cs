@@ -778,11 +778,13 @@ namespace CrawlSharp.Web
             HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
             CookieContainer cookies = new CookieContainer();
 
-            using (HttpClientHandler handler = new HttpClientHandler
+            // Crawled sites are third parties, so no W3C trace context (traceparent/tracestate) is sent to them.
+            using (SocketsHttpHandler handler = new SocketsHttpHandler
             {
                 AllowAutoRedirect = false,
                 UseCookies = true,
-                CookieContainer = cookies
+                CookieContainer = cookies,
+                ActivityHeadersPropagator = DistributedContextPropagator.CreateNoOutputPropagator()
             })
             using (HttpClient client = new HttpClient(handler, false))
             {

@@ -1,5 +1,15 @@
 # Change Log
 
+## v1.2.1
+
+### Fixes
+
+- Requests to crawled sites no longer carry W3C trace context.  Outbound HTTP spans were injecting `traceparent` and `tracestate` headers, sending trace and span IDs to third-party sites; the crawler's HTTP handler now suppresses trace context propagation.  Spans and metrics are unchanged.
+
+### Dependencies
+
+- Server: Watson 7.1.0 to 7.2.1.
+
 ## v1.2.0
 
 ### Additions

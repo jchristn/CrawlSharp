@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-		<Version>1.2.0</Version>
+		<Version>1.2.1</Version>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<DocumentationFile>CrawlSharp.xml</DocumentationFile>
@@ -17,7 +17,7 @@
 		<RepositoryUrl>https://github.com/jchristn/CrawlSharp</RepositoryUrl>
 		<RepositoryType>github</RepositoryType>
 		<PackageTags>web crawl crawler opentelemetry metrics tracing</PackageTags>
-		<PackageReleaseNotes>Built-in observability: CrawlSharp emits metrics and traces through the BCL Meter and ActivitySource named "CrawlSharp" (crawl jobs, every pipeline stage, pages, links, redirects, outbound HTTP and Playwright calls, queue and worker gauges, errors by type). Near-zero cost until a host subscribes; no exporter dependency. Names are in CrawlSharp.Telemetry.CrawlSharpTelemetry and documented in TELEMETRY.md. Also fixes a worker-slot over-release after a failed page.</PackageReleaseNotes>
+		<PackageReleaseNotes>1.2.1: requests to crawled sites no longer carry W3C trace context (traceparent/tracestate) headers. 1.2.0: built-in observability: CrawlSharp emits metrics and traces through the BCL Meter and ActivitySource named "CrawlSharp" (crawl jobs, every pipeline stage, pages, links, redirects, outbound HTTP and Playwright calls, queue and worker gauges, errors by type). Near-zero cost until a host subscribes; no exporter dependency. Names are in CrawlSharp.Telemetry.CrawlSharpTelemetry and documented in TELEMETRY.md. Also fixes a worker-slot over-release after a failed page.</PackageReleaseNotes>
 		<PackageLicenseFile>LICENSE.md</PackageLicenseFile>
 		<IncludeSymbols>True</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>

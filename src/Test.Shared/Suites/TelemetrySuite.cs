@@ -140,6 +140,33 @@ namespace Test.Shared.Suites
                     Check.NotNull(fetchParent, "Fetch stages nest under page spans.");
                 }),
 
+                Case.Async(Id, "Crawl_NoTraceContextToSites", "Requests to crawled sites carry no W3C trace context headers", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    server.AddHtml("/", "<html><body><a href=\"/a\">a</a></body></html>");
+                    server.AddHtml("/a", "<html><body>a</body></html>");
+
+                    using TelemetryCapture capture = new TelemetryCapture(CrawlSharpTelemetry.ActivitySourceName);
+
+                    using (Activity parent = TelemetryCapture.StartTestSpan("test"))
+                    {
+                        Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/"), configure: c =>
+                        {
+                            c.FollowLinks = true;
+                            c.MaxCrawlDepth = 1;
+                        });
+
+                        List<WebResource> resources = await CrawlHelper.CrawlAllWithinAsync(settings, TimeoutSeconds, ct);
+                        Check.Count(2, resources);
+                    }
+
+                    List<RecordedRequest> requests = server.Requests();
+                    Check.True(requests.Count >= 2, "The fixture received the crawl's requests.");
+                    Check.True(requests.All(r => r.Headers["traceparent"] == null), "No traceparent header is sent to crawled sites.");
+                    Check.True(requests.All(r => r.Headers["tracestate"] == null), "No tracestate header is sent to crawled sites.");
+                    Check.True(requests.All(r => r.Headers["Request-Id"] == null), "No Request-Id header is sent to crawled sites.");
+                }),
+
                 Case.Async(Id, "Crawl_JobAndGaugeMetrics", "Job, page, link and gauge metrics are recorded and gauges return to zero", async ct =>
                 {
                     using FixtureServer server = new FixtureServer();
