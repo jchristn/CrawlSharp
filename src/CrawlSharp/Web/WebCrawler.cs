@@ -1921,6 +1921,12 @@ namespace CrawlSharp.Web
             }
         }
 
+        private static bool IsAutoExpandFailure(Exception ex)
+        {
+            // Playwright reports a client-side timeout as System.TimeoutException, not PlaywrightException.
+            return ex is PlaywrightException || ex is System.TimeoutException;
+        }
+
         private async Task<int> OpenDetailsElements(IPage page)
         {
             if (page == null) return 0;
@@ -1939,7 +1945,7 @@ namespace CrawlSharp.Web
                         return changed;
                     }").ConfigureAwait(false);
             }
-            catch (PlaywrightException ex)
+            catch (Exception ex) when (IsAutoExpandFailure(ex))
             {
                 Log("auto-expand unable to open <details> elements: " + ex.Message);
                 return 0;
@@ -1966,7 +1972,7 @@ namespace CrawlSharp.Web
                 {
                     clicks += await ClickSelectorTargets(page, new[] { selector }, token).ConfigureAwait(false);
                 }
-                catch (PlaywrightException ex)
+                catch (Exception ex) when (IsAutoExpandFailure(ex))
                 {
                     Log("auto-expand custom selector failed '" + selector + "': " + ex.Message);
                 }
@@ -1994,7 +2000,7 @@ namespace CrawlSharp.Web
             {
                 count = await locator.CountAsync().ConfigureAwait(false);
             }
-            catch (PlaywrightException ex)
+            catch (Exception ex) when (IsAutoExpandFailure(ex))
             {
                 Log("auto-expand selector lookup failed '" + selector + "': " + ex.Message);
                 return 0;
@@ -2035,7 +2041,7 @@ namespace CrawlSharp.Web
 
                     clicks++;
                 }
-                catch (PlaywrightException ex)
+                catch (Exception ex) when (IsAutoExpandFailure(ex))
                 {
                     Log("auto-expand click skipped for selector '" + selector + "': " + ex.Message);
                 }

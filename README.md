@@ -6,6 +6,11 @@
 
 CrawlSharp is a library and integrated webserver for crawling basic web content.
 
+## New in v1.2.2
+
+- A click that times out during headless auto-expand is skipped instead of discarding the whole page
+- Dependencies updated: Microsoft.Playwright 1.63.0 (Firefox 155), HtmlAgilityPack 1.13.0, SerializationHelper 2.1.0; the server is on Watson 7.2.2 and SyslogLogging 2.3.1
+
 ## New in v1.2.1
 
 - Requests to crawled sites no longer carry W3C trace context (`traceparent`/`tracestate`) headers

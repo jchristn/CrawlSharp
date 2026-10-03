@@ -134,6 +134,28 @@ namespace Test.Shared.Suites
                     Check.Equal("Custom content", node.InnerText.Trim());
                 }),
 
+                Headless("ClickTimeout", "A click that times out during auto-expand is skipped and the page is still returned", async ct =>
+                {
+                    using FixtureServer server = new FixtureServer();
+                    server.AddHtml("/blocking", "<!DOCTYPE html><html><body>" +
+                        "<div id='static-content'>Static content</div>" +
+                        "<button class='faq-toggle' onclick='var t=Date.now()+3000;while(Date.now()<t){}'>Open</button>" +
+                        "</body></html>");
+
+                    Settings settings = CrawlHelper.CreateSettings(server.UrlFor("/blocking"), headless: true, configure: c =>
+                    {
+                        c.AutoExpandCollapsibles = true;
+                        c.ExpansionSelectors = new List<string> { ".faq-toggle" };
+                    });
+
+                    WebResource resource = await CrawlHelper.CrawlSingleAsync(settings, ct);
+                    HtmlNode node = Load(resource).DocumentNode.SelectSingleNode("//*[@id='static-content']");
+
+                    Check.Equal(200, resource.Status);
+                    Check.NotNull(node);
+                    Check.Equal("Static content", node.InnerText.Trim());
+                }),
+
                 Headless("RevealedLinks", "Revealed links are discovered only when auto-expand is enabled", async ct =>
                 {
                     using FixtureServer server = new FixtureServer();

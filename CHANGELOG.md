@@ -1,5 +1,17 @@
 # Change Log
 
+## v1.2.2
+
+### Fixes
+
+- Headless auto-expand discarded the whole page when a click timed out.  Playwright reports its client-side timeout as `System.TimeoutException`, not `PlaywrightException`, so a slow or blocking click escaped the per-click handler and failed the page with no resource returned.  Timeouts while opening `<details>`, locating targets or clicking are now logged and skipped like any other failed click, and the rendered page is still returned.  New headless case `ClickTimeout` covers it.
+
+### Dependencies
+
+- Library: Microsoft.Playwright 1.62.0 to 1.63.0 (Firefox 155; run `playwright.ps1 install firefox` again after upgrading), HtmlAgilityPack 1.12.4 to 1.13.0, SerializationHelper 2.0.3 to 2.1.0.
+- Server: Watson 7.2.1 to 7.2.2, SyslogLogging 2.2.1 to 2.3.1, SerializationHelper 2.0.3 to 2.1.0.
+- Tests: Touchstone 0.1.12 to 0.2.0, NUnit 4.6.1 to 5.0.0, NUnit.Analyzers 4.14.0 to 4.15.0, NUnit3TestAdapter 6.2.0 to 6.3.0, Microsoft.NET.Test.Sdk 18.9.0 to 18.10.1, coverlet.collector 10.0.1 to 10.1.0.
+
 ## v1.2.1
 
 ### Fixes
